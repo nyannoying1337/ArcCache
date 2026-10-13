@@ -10,7 +10,7 @@ class Request {
     public bool RiskConfirmed {get;set;}
     public bool ReadOnly {get;set;}
     public uint SteamAppId {get;set;}public string InstallDirectory {get;set;}
-    public string Action {get;set;}public string Executable {get;set;}public string ReceiptPath {get;set;}public string SourceReceipt {get;set;}public string DriverFolder {get;set;}public int MiB {get;set;}public bool Confirmed {get;set;}
+    public string DriverFile {get;set;}public string Action {get;set;}public string Executable {get;set;}public string ReceiptPath {get;set;}public string SourceReceipt {get;set;}public string DriverFolder {get;set;}public int MiB {get;set;}public bool Confirmed {get;set;}
 }
 class Worker {
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]static extern ulong GetTickCount64();
@@ -181,6 +181,9 @@ class Worker {
                 case "Status":data=Status();message="Installed driver compatibility inspected.";break;
                 case "DriverIdentity":data=DriverIdentity();message="Driver metadata checked; no DLL hashing or writes.";break;
                 case "CheckDriverCompatibility":data=Status(true);message="Read-only DLL, signature and full-package compatibility review completed. Signature candidates do not enable patches.";break;
+                case "ScanDriverFile":if(String.IsNullOrWhiteSpace(r.DriverFile))throw new InvalidDataException("Select a DLL to inspect.");data=DriverCatalog.Review(r.DriverFile,true);message="Read-only structural DLL inspection completed. A candidate is not a runtime compatibility result.";break;
+                case "CreateXe3Experiment":Consent(r);if(!r.RiskConfirmed)throw new InvalidOperationException("Explicit experimental risk acknowledgment is required.");data=Xe3Experiment.Create(r.DriverFile,r.MiB,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.Xe3Probe.exe"));message="Isolated Xe3 test bundle prepared. No game/system files changed; device test has not run.";break;
+                case "RunXe3Experiment":Consent(r);if(!r.RiskConfirmed)throw new InvalidOperationException("Explicit experimental risk acknowledgment is required.");data=Xe3Experiment.Run(r.ReceiptPath,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.Xe3Probe.exe"));message="Isolated Xe3 device test finished. Read its result; capacity and game compatibility remain unmeasured.";break;
                 case "Observe":message=WindowsPlatform.Observe(true).ToString();break;
                 case "ObserveGame":message=ObserveGame(r.Executable);break;
                 case "GameState":data=GameState(r);message="Game setup inspected by the safety engine.";break;

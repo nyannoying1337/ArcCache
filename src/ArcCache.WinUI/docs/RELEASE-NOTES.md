@@ -4,7 +4,7 @@ Download `ArcCache-Experimental-2026.10.13-Windows-x64.zip`, extract the complet
 
 ## This version
 
-Standard presets plus experimental 8/16 GiB, active-driver update detection/read-only review, and a broader external overlay. Only the exact qualified Intel Arc B580 Xe2 32.0.101.9034 package is supported. Unknown versions remain blocked even if a byte pattern matches. Xe3 is inspected/research-tested, but game patching remains disabled.
+Standard presets plus experimental 8/16 GiB, active-driver update detection/read-only review, and a broader external overlay. Only the exact qualified Intel Arc B580 Xe2 32.0.101.9034 package is supported. Unknown versions remain blocked even if a byte pattern matches. Xe3 DLL inspection and reviewed isolated device tests are experimental; per-game Xe3 profiles are not qualified.
 
 The routing setting now says **Use private drivers** and explains when it is required. On/off/restart-required statuses are distinct. A saved limit stays visible when routing is inactive; private launch is blocked until ready. One-game rollback is separate from restoring the machine-wide setting.
 
@@ -16,7 +16,7 @@ The routing setting now says **Use private drivers** and explains when it is req
 
 ## Evidence and limitations
 
-User tests confirmed Witcher 3 gameplay and repaired Ready or Not menu loading at original 512 MiB, 1 GiB and 4 GiB. Paths/disk hashes were observed; cache-capacity/growth effects remain **unmeasured**. 8/16 GiB passed isolated B580 device/pipeline probes and wrapper/unwind checks, not large-cache gameplay/reload. A large cache can consume roughly its file size in contiguous RAM; the patch does not implement a low-memory Intel parser.
+Loading checks cover Witcher 3 gameplay and repaired Ready or Not menu loading at original 512 MiB, 1 GiB and 4 GiB. Paths/disk hashes were observed; cache-capacity/growth effects remain **unmeasured**. 8/16 GiB passed isolated B580 device/pipeline probes and wrapper/unwind checks, not large-cache gameplay/reload. A large cache can consume roughly its file size in contiguous RAM; the patch does not implement a low-memory Intel parser.
 
 Current source builds pass 27 core/worker/bridge checks, 27 larger-patch/native-wrapper checks, 10 catalogue checks and 5 isolated Xe3 constructor checks. Both actual routing screens were rendered and inspected. Read-only checks did not install new game or system patches.
 

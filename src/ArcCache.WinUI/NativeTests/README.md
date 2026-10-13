@@ -1,7 +1,9 @@
-The probe checks only DLL loading; it creates no Direct3D device or shaders. Compile `ProxyLoadProbe.cpp` with the x64 MSVC compiler. Put the executable and the freshly built SCSKiller `d3d12.dll` in a dedicated test directory outside any game. Normal invocation must load successfully (exit 0).
+# Native validation probes
 
-For the redirection case, use another dedicated folder with those two files and an empty `ProxyLoadProbe.exe.local` directory. With the test machine's existing, already-active DevOverrideEnable=1 configuration, invoke `ProxyLoadProbe.exe --expect-fail`. The fixed proxy must refuse self-forwarding: load fails, Win32 error 1114, test exit 0. This fixture does not change the registry and does not enable developer routing. Do not run this experiment inside a real game installation. It verifies fail-closed handling, not private-driver/recorder compatibility.
+These probes validate constructor state, loader behavior and compatibility guards. They require Windows and x64 MSVC, plus local qualified original DLLs where specified. No proprietary test DLLs are distributed.
 
-The case was verified on the B580 test PC. The unchanged `selftest sysdxgi` command also passed. Full shader/GPU selftests were not run while Witcher was playing.
+`CapConstructorProbe.cpp` executes only the reviewed constructor with a stubbed external helper. It verifies field values and preservation of unrelated state; it does not establish shader-cache capacity.
 
-`CapConstructorProbe.cpp` is a separate x64 native test of the 2/4 GiB constructor patches. Compile with `cl /EHsc /O2 CapConstructorProbe.cpp`. Pass the Engine-verified original, 2 GiB and 4 GiB copies as three arguments. It executes only the 96-byte reviewed constructor copied into its own RX memory, replacing its helper call with the same RET stub in every sample. It never loads a driver, touches a game, changes Windows enforcement or patches system files. Output must confirm exact cap values, neighboring 4 GiB field, return pointer and all other object bytes. This does not test the helper, cache subsystem, graphics device creation or game compatibility.
+The proxy/debug-helper probes exercise isolated DLL-loading behavior and known private-routing conflicts. The SCSKiller recorder remains an external integration with unresolved private-driver compatibility. These probes are test evidence, not generic game-hook support.
+
+[Build/test guide](../../../docs/DEVELOPMENT.md) · [Coverage](../../../docs/TESTING.md).

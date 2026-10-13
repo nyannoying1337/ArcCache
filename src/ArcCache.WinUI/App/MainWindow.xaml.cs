@@ -17,6 +17,7 @@ public partial class MainWindow : Window {
     SteamGame? selected;
     ReceiptState? selectedReceipt;
     GameSetupState? setupState;
+    string? experimentDll,experimentReceipt;bool experimentReviewed;
     bool busy,driverOriginal,routingReady,receiptValid,recordValid;
     string? steamRoot;
     Process? cacheMonitor;
@@ -56,6 +57,7 @@ public partial class MainWindow : Window {
                 if(appId!=0){selected=games.FirstOrDefault(g=>g.AppId==appId);await Run("Showing selected game for read-only preview…",ShowGame);Filter();}
                 await Task.Delay(700);while(busy)await Task.Delay(200);Root.Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,32,32,32));Root.UpdateLayout();
                 if(simulateDriverUpdate){ShowDriverChange(driverIdentity+"-preview-fixture");File.WriteAllText(path+".driver-checks.json",JsonSerializer.Serialize(new{ApplyEnabled=ApplyButton.IsEnabled,ApplyLabel=ApplyButton.Content?.ToString(),LaunchEnabled=LaunchButton.IsEnabled,RecoveryEnabled=RestoreButton.IsEnabled,NoticeVisible=DriverUpdateNotice.IsOpen}));}
+                if(Environment.GetCommandLineArgs().Contains("--preview-driver")){Nav.SelectedItem=Nav.MenuItems.OfType<NavigationViewItem>().First(i=>Equals(i.Tag,"Driver"));var identity=await Engine(new("DriverIdentity",ReadOnly:true));string? folder=identity.Data.GetProperty("DriverFolder").GetString();if(folder!=null)await ScanExperiment(Path.Combine(folder,"igd12um64xe3.dll"));await Task.Delay(300);Root.UpdateLayout();File.WriteAllText(path+".xe3-checks.json",JsonSerializer.Serialize(new{Reviewed=experimentReviewed,PrepareEnabled=Xe3Prepare.IsEnabled,RunEnabled=Xe3Run.IsEnabled,Busy=busy}));}
                 if(Environment.GetCommandLineArgs().Contains("--preview-settings")){Nav.SelectedItem=Nav.FooterMenuItems.OfType<NavigationViewItem>().First(i=>Equals(i.Tag,"Settings"));Root.UpdateLayout();}
                 int runsBefore=foregroundRuns,pollsBefore=backgroundPolls;
                 if(previewWatchSeconds>0)await Task.Delay(previewWatchSeconds*1000);
@@ -105,7 +107,7 @@ public partial class MainWindow : Window {
             DriverTitle.Text=driverOriginal?"Driver compatible with this build":"Driver compatibility review required";
             DriverSummary.Text=$"{d.GetProperty("Adapter").GetString()} · {d.GetProperty("Version").GetString()}\n"+d.GetProperty("CompatibilityReason").GetString();
             var details=new List<string>{"Package: "+d.GetProperty("DriverFolder").GetString()};
-            foreach(var f in d.GetProperty("Files").EnumerateArray())details.Add($"{f.GetProperty("Name").GetString()} · {f.GetProperty("State").GetString()}\nSHA-256: {f.GetProperty("Hash").GetString()}\nCandidate signatures: {f.GetProperty("CandidateCount").GetInt32()} · patch eligible for active package: {f.GetProperty("PatchEnabled").GetBoolean()}\n{f.GetProperty("Signature").GetString()}");
+            foreach(var f in d.GetProperty("Files").EnumerateArray())details.Add($"{f.GetProperty("Name").GetString()} · {f.GetProperty("State").GetString()}\nSHA-256: {f.GetProperty("Hash").GetString()}\nConstructor matches: {f.GetProperty("CandidateCount").GetInt32()} · game profile eligible: {f.GetProperty("PatchEnabled").GetBoolean()} · Xe3 device test available: {f.GetProperty("ExperimentalTestEnabled").GetBoolean()}\n{f.GetProperty("Signature").GetString()}");
             DriverDetails.Text=string.Join("\n\n",details);
             OverrideStatus.Text=RoutingPresentation.Status(d.GetProperty("DeveloperOverride").GetBoolean(),d.GetProperty("RebootRequired").GetBoolean());
             bool changedSinceLastReview=false;
@@ -224,6 +226,7 @@ public partial class MainWindow : Window {
     }
     void UpdateButtons() {
         if(ApplyButton==null)return;
+        Xe3Prepare.IsEnabled=!busy&&experimentReviewed;Xe3Run.IsEnabled=!busy&&experimentReceipt!=null;Xe3Folder.IsEnabled=!busy&&experimentReceipt!=null;
         bool supported=selected?.Supported==true;bool configured=setupState?.Configured==true;
         ApplyButton.IsEnabled=!busy&&supported&&driverOriginal&&routingReady&&(configured||setupState?.CanPrepare==true)&&!NeedsControlObservation();
         RestoreButton.IsEnabled=!busy&&selected?.SupportedExecutable!=null&&recordValid&&selectedReceipt?.Status!="removed";LaunchButton.IsEnabled=!busy&&selected!=null;ImportButton.IsEnabled=!busy&&selected!=null;CapChoice.IsEnabled=!busy&&supported;
@@ -257,6 +260,36 @@ public partial class MainWindow : Window {
     async void RefreshLibrary(object sender,RoutedEventArgs e)=>await Run("Refreshing Steam…",LoadLibrary);
     void SearchChanged(AutoSuggestBox sender,AutoSuggestBoxTextChangedEventArgs args){if(!busy)Filter();}
     async void GameSelected(object sender,SelectionChangedEventArgs e){if(busy||synchronizingSelection)return;var next=GamesList.SelectedItem as SteamGame;if(next?.AppId==selected?.AppId)return;selected=next;await Run("Checking this game's setup…",ShowGame);}
+    async Task ScanExperiment(string path) {
+        experimentReviewed=false;experimentDll=path;experimentReceipt=null;
+        var reply=await Engine(new("ScanDriverFile",DriverFile:path,ReadOnly:true));var f=reply.Data;
+        experimentReviewed=f.GetProperty("ExperimentalTestEnabled").GetBoolean();
+        ExperimentSummary.Text=f.GetProperty("Assessment").GetString();ExperimentDetails.Text=$"File: {path}\nSHA-256: {f.GetProperty("Hash").GetString()}\nConstructor matches: {f.GetProperty("CandidateCount").GetInt32()}\n{f.GetProperty("Error").GetString()}";
+        UpdateButtons();
+    }
+    async void ScanExperimentalDll(object sender,RoutedEventArgs e) {
+        if(busy)return;var picker=new FileOpenPicker();picker.FileTypeFilter.Add(".dll");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));var file=await picker.PickSingleFileAsync();if(file!=null)await Run("Inspecting the selected DLL without changes…",()=>ScanExperiment(file.Path));
+    }
+    async void ScanInstalledXe3(object sender,RoutedEventArgs e) {
+        await Run("Inspecting the installed Xe3 DLL…",async()=>{var identity=await Engine(new("DriverIdentity",ReadOnly:true));string folder=identity.Data.GetProperty("DriverFolder").GetString()??throw new IOException("No active Intel package was found.");await ScanExperiment(Path.Combine(folder,"igd12um64xe3.dll"));});
+    }
+    async void PrepareXe3(object sender,RoutedEventArgs e) {
+        if(busy||!experimentReviewed||experimentDll==null)return;int mib=int.Parse(((ComboBoxItem)Xe3Cap.SelectedItem).Tag.ToString()!);
+        if(!await Confirm("Prepare an isolated Xe3 test","Create a local test bundle for "+SetupPresentation.Limit(mib)+"? No game or system driver is changed. The copied active package can use up to 2 GiB of disk space. This is a runtime experiment, not game support. Use the unchanged 512 MiB control first. Run the app normally, without administrator rights.","Prepare test bundle",requireRisk:true))return;
+        await Run("Preparing a verified Xe3 device-test bundle…",async()=>{var reply=await Engine(new("CreateXe3Experiment",MiB:mib,Confirmed:true,RiskConfirmed:true,DriverFile:experimentDll));experimentReceipt=reply.Data.GetProperty("Receipt").GetString();ExperimentSummary.Text="Test bundle prepared. Run the isolated device test next; runtime is not verified yet.";ExperimentDetails.Text="Receipt: "+experimentReceipt;});
+    }
+    async void RunXe3(object sender,RoutedEventArgs e) {
+        if(busy||experimentReceipt==null)return;
+        if(!await Confirm("Run the isolated Xe3 device test","This starts only this bundle’s device probe, with no game injection or system-driver replacement. It creates an Intel D3D12 device and one trivial compute pipeline, without dispatching GPU work. A small cache entry may be written. Matching Xe3 hardware and enabled/restarted private routing are required. The probe times out after 60 seconds. A pass does not establish game compatibility or cache capacity.","Run device test",requireRisk:true))return;
+        await Run("Running the isolated Xe3 probe…",async()=>{var reply=await Engine(new("RunXe3Experiment",ReceiptPath:experimentReceipt,Confirmed:true,RiskConfirmed:true));bool verified=reply.Data.GetProperty("RuntimeVerified").GetBoolean();ExperimentSummary.Text=verified?"Device test passed — game compatibility and capacity remain unverified.":"Runtime not verified. Keep the original driver and inspect the report below.";ExperimentDetails.Text=reply.Data.GetProperty("Report").GetString()+"\nReceipt: "+experimentReceipt;});
+    }
+    async void OpenXe3Receipt(object sender,RoutedEventArgs e) {
+        if(busy)return;var picker=new FileOpenPicker();picker.FileTypeFilter.Add(".json");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));var file=await picker.PickSingleFileAsync();if(file==null)return;
+        experimentReceipt=file.Path;ExperimentSummary.Text="Test receipt selected. All files and the active package will be validated before the probe can run.";ExperimentDetails.Text="Receipt: "+file.Path;UpdateButtons();
+    }
+    void OpenXe3Folder(object sender,RoutedEventArgs e) {
+        if(experimentReceipt==null)return;try{Process.Start(new ProcessStartInfo("explorer.exe"){UseShellExecute=true,ArgumentList={Path.GetDirectoryName(experimentReceipt)!}});}catch(Exception error){Log("Could not open experiment folder: "+error.Message);}
+    }
     async void InspectDriver(object sender,RoutedEventArgs e)=>await Run("Checking current DLLs and package compatibility…",()=>LoadDriver(true));
     async void ApplyGame(object sender,RoutedEventArgs e) {
         SteamGame? game=selected;if(busy||game?.Supported!=true)return;

@@ -1,7 +1,7 @@
 ﻿using System;using System.IO;using System.Linq;using System.Collections.Generic;using System.Diagnostics;using Microsoft.Win32;using System.Runtime.InteropServices;using System.Text;
 namespace ArcCap {
 public class AdapterPackage {public string Adapter,Version,Folder;}
-public class DriverFileReview {public string Name,Version,Hash,Signature,State,Error;public long Size;public int CandidateCount;public int[] CandidateOffsets;public bool PatchEnabled;}
+public class DriverFileReview {public string Name,Version,Hash,Signature,State,Error;public long Size;public int CandidateCount;public int[] CandidateOffsets;public bool PatchEnabled,StructurallyPatchable,ExperimentalTestEnabled;public string Assessment;}
 public static class DriverCatalog {
  public const string KnownVersion="32.0.101.9034",Xe3Original="029E091F5B67A7418B39900E2AC4EAC9EF64767595E0138FF6569CC42FEB4911";
  public static readonly string[] Names={"igd12um64xe2.dll","igd12um64xe3.dll","igd12um64xeh.dll"};
@@ -45,7 +45,8 @@ public static class DriverCatalog {
   byte[] signature=Engine.Hex("48895c2408574883ec2033ff48c741100000002048b80000000001000000893948894108");var found=new List<int>();
   if(bytes.Length<256||bytes[0]!=77||bytes[1]!=90)return found.ToArray();int nt=BitConverter.ToInt32(bytes,0x3c);
   if(nt<0||nt>bytes.Length-26||BitConverter.ToUInt32(bytes,nt)!=0x4550||BitConverter.ToUInt16(bytes,nt+4)!=0x8664)return found.ToArray();
-  int table=nt+24+BitConverter.ToUInt16(bytes,nt+20),count=BitConverter.ToUInt16(bytes,nt+6);
+  int optional=BitConverter.ToUInt16(bytes,nt+20);if(optional<112||nt+24+optional>bytes.Length||BitConverter.ToUInt16(bytes,nt+24)!=0x20b)return found.ToArray();
+  int table=nt+24+optional,count=BitConverter.ToUInt16(bytes,nt+6);
   if(count>96||table<0||table>bytes.Length-count*40)return found.ToArray();
   for(int section=0;section<count;section++){int q=table+40*section;if((BitConverter.ToUInt32(bytes,q+36)&0x20000000)==0)continue;
    uint start=BitConverter.ToUInt32(bytes,q+20),size=BitConverter.ToUInt32(bytes,q+16);if((ulong)start+size>(ulong)bytes.Length)continue;
@@ -58,10 +59,13 @@ public static class DriverCatalog {
   try{Engine.CheckPath(file);var info=new FileInfo(file);r.Size=info.Length;if(r.Size<256||r.Size>128L*1024*1024)throw new InvalidDataException("DLL size outside review bounds.");
    byte[] bytes=File.ReadAllBytes(file);r.Hash=Engine.Hash(bytes);r.Version=FileVersionInfo.GetVersionInfo(file).FileVersion;r.CandidateOffsets=CandidateOffsets(bytes);r.CandidateCount=r.CandidateOffsets.Length;
    if(r.Name.Equals("igd12um64xe2.dll",StringComparison.OrdinalIgnoreCase)){try{var inspection=Engine.Inspect(bytes);r.State=inspection.Hash==Engine.Original?"QualifiedOriginal":"QualifiedModified";r.PatchEnabled=inspection.Hash==Engine.Original;}catch(InvalidDataException){r.State="Unqualified";}}
-   else if(r.Name.Equals("igd12um64xe3.dll",StringComparison.OrdinalIgnoreCase)&&r.Hash==Xe3Original)r.State="Xe3ConstructorReviewedHardwareUnverified";
+   else if(r.Name.Equals("igd12um64xe3.dll",StringComparison.OrdinalIgnoreCase)&&r.Hash==Xe3Original)r.State="ReviewedXe3ExperimentalConstructor";
    else r.State="Unqualified";
+   r.StructurallyPatchable=r.CandidateCount==1;
+   r.ExperimentalTestEnabled=r.Name.Equals("igd12um64xe3.dll",StringComparison.OrdinalIgnoreCase)&&r.Hash==Xe3Original&&r.CandidateCount==1&&r.CandidateOffsets[0]==0x1900e0;
+   r.Assessment=r.ExperimentalTestEnabled?"Reviewed Xe3 constructor: isolated device-test bundles are available. Runtime and game compatibility are not established.":r.PatchEnabled?"Reviewed Xe2 image; per-game deployment still requires the matching complete package.":r.CandidateCount==1?"A matching cache constructor was found. This is a structural candidate, not a qualified patch definition.":r.CandidateCount>1?"Multiple constructor matches: ambiguous, do not patch.":"No matching cache constructor found.";
    if(signatures)r.Signature=WindowsPlatform.EmbeddedSignature(file);
-  }catch(Exception e){r.Error=e.Message;r.State="Unavailable";}return r;
+  }catch(Exception e){r.Error=e.Message;r.State="Unavailable";r.Assessment="The DLL could not be inspected: "+e.Message;r.ExperimentalTestEnabled=false;r.PatchEnabled=false;}return r;
  }
  public static bool CohortQualified(AdapterPackage p,out string reason){
   if(p==null){reason="No active Intel package found.";return false;}

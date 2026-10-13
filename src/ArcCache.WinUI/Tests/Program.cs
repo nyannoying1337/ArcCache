@@ -126,8 +126,14 @@ Test("Steam multiple libraries, install flags, duplicate IDs and traversal",()=>
 });
 if(args.Length>0) {
     var safety=new SafetyClient(Path.GetFullPath(args[0]));
+    Test("Xe3 device experiments require consent and risk acknowledgment even for read-only requests",()=>{
+        foreach(string action in new[]{"CreateXe3Experiment","RunXe3Experiment"}){
+            var readOnly=safety.RunAsync(new(action,Confirmed:true,RiskConfirmed:true,ReadOnly:true)).GetAwaiter().GetResult();Check(!readOnly.Ok&&readOnly.Message.Contains("Read-only"),"Read-only request permitted a device experiment.");
+            var risk=safety.RunAsync(new(action,Confirmed:true)).GetAwaiter().GetResult();Check(!risk.Ok&&risk.Message.Contains("risk acknowledgment"),"Missing risk acknowledgment permitted a device experiment.");
+        }
+    });
     Test("Worker refuses unknown operations without changes",()=>{var reply=safety.RunAsync(new("UnknownOperation")).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Unknown action"),"Unknown operation accepted.");});
-    Test("Worker refuses all mutation kinds without explicit confirmation",()=>{foreach(string action in new[]{"Prepare","Change","Remove","Import","EnableOverride","RestoreOverride"}){var reply=safety.RunAsync(new(action)).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Explicit confirmation"),"Mutation accepted without confirmation: "+action);}});
+    Test("Worker refuses all mutation kinds without explicit confirmation",()=>{foreach(string action in new[]{"Prepare","Change","Remove","Import","EnableOverride","RestoreOverride","CreateXe3Experiment","RunXe3Experiment"}){var reply=safety.RunAsync(new(action)).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Explicit confirmation"),"Mutation accepted without confirmation: "+action);}});
     Test("Automatic discovery never guesses an executable for a stopped unknown title",()=>{
         string root=Path.Combine(Path.GetTempPath(),"ArcDiscovery-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
         try{File.Copy(Environment.ProcessPath!,Path.Combine(root,"possible-game.exe"));var result=safety.RunAsync(new("DiscoverGame",SteamAppId:987654,InstallDirectory:root)).GetAwaiter().GetResult();Check(result.Ok&&!result.Data.GetProperty("Validated").GetBoolean()&&result.Data.GetProperty("Executable").ValueKind==JsonValueKind.Null,"A static executable filename was mistaken for a rendering process.");Check(!Directory.Exists(Path.Combine(root,"possible-game.exe.local")),"Discovery modified the game.");}finally{Directory.Delete(root,true);}

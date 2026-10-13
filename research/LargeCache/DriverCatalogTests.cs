@@ -11,9 +11,11 @@ class DriverCatalogTests {
   byte[] original=File.ReadAllBytes(args[0]);Check(DriverCatalog.CandidateOffsets(original).Length==1,"qualified Xe2 constructor is found once in executable section");
   byte[] xe3=File.ReadAllBytes(args[1]);Check(DriverCatalog.CandidateOffsets(xe3).Length==1,"Xe3 constructor is found independently at a different offset");
   string candidate=Path.Combine(root,"igd12um64xe3.dll");File.WriteAllBytes(candidate,xe3);var review=DriverCatalog.Review(candidate,false);
-  Check(review.State=="Xe3ConstructorReviewedHardwareUnverified"&&!review.PatchEnabled,"Xe3 image review never enables a game patch");
+  Check(review.State=="ReviewedXe3ExperimentalConstructor"&&!review.PatchEnabled&&review.ExperimentalTestEnabled,"Reviewed Xe3 permits an isolated device test without inheriting a game profile");
   xe3[0x2000]^=1;File.WriteAllBytes(candidate,xe3);review=DriverCatalog.Review(candidate,false);
-  Check(review.CandidateCount==1&&review.State=="Unqualified"&&!review.PatchEnabled,"matching signature in unknown image never enables patching");
+  Check(review.CandidateCount==1&&review.StructurallyPatchable&&review.State=="Unqualified"&&!review.PatchEnabled&&!review.ExperimentalTestEnabled,"matching signature in unknown image never enables patching");
+  foreach(int mib in new[]{512,1024,2048,4096}){byte[] source=File.ReadAllBytes(args[1]);byte[] patched=Xe3Experiment.Patch(source,mib);Check(patched.Length==source.Length,"Xe3 test copy keeps image size "+mib);byte[] normalized=(byte[])patched.Clone();Array.Copy(source,0x1900ec,normalized,0x1900ec,24);Check(Engine.Hash(normalized)==DriverCatalog.Xe3Original,"Xe3 patch changes only the reviewed constructor "+mib);}
+  bool refused=false;try{Xe3Experiment.Patch(xe3,1024);}catch(InvalidDataException){refused=true;}Check(refused,"Unknown structural match cannot become a patched experiment");
   byte[] malformed=new byte[512];Check(DriverCatalog.CandidateOffsets(malformed).Length==0,"malformed PE has no trusted signature candidate");
   Console.WriteLine("Passed "+count+" driver catalogue checks. Only temporary fixtures were changed.");return 0;
  }catch(Exception e){Console.WriteLine(e);return 1;}finally{Directory.Delete(root,true);}}

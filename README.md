@@ -26,14 +26,14 @@
 
 | | Standard preview | Large-cache experimental preview |
 | --- | --- | --- |
-| Download | [Standard release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-standard-preview-2026.10.13) | [Experimental release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-experimental-preview-2026.10.13) |
+| Download | [Standard release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-standard-preview-2026.10.13) | [Experimental release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-experimental-xe3-preview-2026.10.13) |
 | Presets | Original 512 MiB · 1 · 2 · 4 GiB | Standard presets + 8 · 16 GiB |
 | Source | [`main`](https://github.com/nyannoying1337/ArcCache/tree/main/src) | [`large-cache-experimental`](https://github.com/nyannoying1337/ArcCache/tree/large-cache-experimental/src) |
-| Start here if… | You want the standard workflow | You want to test larger limits and driver-update review |
+| Start here if… | You want the standard workflow | You want larger-limit experiments, DLL scans and Xe3 device tests |
 
-**Currently supported:** the exact qualified **Intel Arc B580 / Xe2 driver 32.0.101.9034** package. Unknown packages stay blocked. Xe3 game patching is not enabled.
+**Currently supported:** the exact qualified **Intel Arc B580 / Xe2 driver 32.0.101.9034** package. Unknown packages stay blocked. Xe3 game profiles are not qualified; the experimental build offers isolated Xe3 device tests.
 
-> **These are unsigned previews.** Loading tests do not prove effective shader-cache capacity. 8/16 GiB gameplay and large-cache reload remain unverified; a large cache can require roughly its size in contiguous RAM. [What has actually been tested](src/ArcCache.WinUI/docs/QUICKSTART.md#what-has-actually-been-checked).
+> **These are unsigned previews.** Loading tests do not prove effective shader-cache capacity. 8/16 GiB gameplay and large-cache reload remain unverified; a large cache can require roughly its size in contiguous RAM. [Test coverage and compatibility](docs/TESTING.md).
 
 **You are browsing the experimental branch.** Use `main` for the standard source.
 
@@ -80,6 +80,12 @@ dotnet publish src/ArcCache.WinUI/App/ArcCache.WinUI.csproj -c Release -p:Platfo
 | [Tests](src/ArcCache.WinUI/Tests) | Core, worker and bridge checks; adjacent folders contain safety/native checks |
 
 [Build requirements and test commands →](docs/DEVELOPMENT.md) · [Experimental research source →](https://github.com/nyannoying1337/ArcCache/tree/large-cache-experimental/research/LargeCache)
+
+## Xe3 and new driver DLLs
+
+The experimental build can **inspect the DLL itself** and distinguish a structural candidate from a reviewed patch definition. Its Driver experiments page offers original/1/2/4 GiB isolated tests for the reviewed Xe3 image. The development machine does not need an Xe3 GPU; the tester's machine does.
+
+A matching pattern alone does not qualify an unknown driver. Device tests leave games and the installed driver untouched, and do not establish per-game support or effective capacity. [Testing details](docs/TESTING.md).
 
 ## Need help?
 

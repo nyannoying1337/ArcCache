@@ -2,7 +2,7 @@
 using System.Text.Json;
 
 namespace ArcCache.Core;
-public sealed record WorkerRequest(string Action, string? Executable=null, string? ReceiptPath=null, string? DriverFolder=null, int MiB=512, bool Confirmed=false, string? SourceReceipt=null, uint SteamAppId=0, string? InstallDirectory=null, bool RiskConfirmed=false, bool ReadOnly=false);
+public sealed record WorkerRequest(string Action, string? Executable=null, string? ReceiptPath=null, string? DriverFolder=null, int MiB=512, bool Confirmed=false, string? SourceReceipt=null, uint SteamAppId=0, string? InstallDirectory=null, bool RiskConfirmed=false, bool ReadOnly=false,string? DriverFile=null);
 public sealed record WorkerReply(bool Ok, string Message, JsonElement Data);
 public sealed class SafetyClient(string workerPath) {
     public Action<string,object>? Diagnostic {get;set;}

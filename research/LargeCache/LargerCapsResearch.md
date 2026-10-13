@@ -108,7 +108,7 @@ Xe3 original image: SHA-256 029E091F5B67A7418B39900E2AC4EAC9EF64767595E0138FF656
 - 2 GiB SHA-256 A9ADC9BEB2C9B3C4A0CADA7C057DA16F3EF866C0BDE0B1CA44F965C79FC5E686
 - 4 GiB SHA-256 C9B043204D7BA788B3E3C1C6FAD1BF048CAB548499BB79F3CBBA616E33224A8D
 
-Both samples pass isolated constructor state tests. No Xe3 DLL was loaded as a graphics driver and no game was patched with Xe3. Current hardware enumeration exposes only B580 (Xe2). Xe3 hardware/runtime, full dependency cohort, downstream cache capacity/eviction and larger reload patch locations remain unqualified. The app reports Xe3ConstructorReviewedHardwareUnverified and PatchEnabled=false.
+Both samples pass isolated constructor state tests. No Xe3 DLL was loaded as a graphics driver and no game was patched with Xe3. Current hardware enumeration exposes only B580 (Xe2). Xe3 hardware/runtime, full dependency cohort, downstream cache capacity/eviction and larger reload patch locations remain unqualified. The app separates structural candidates, reviewed Xe3 device experiments and qualified per-game profiles.
 
 Primary hardware references:
 https://www.intel.com/content/www/us/en/products/sku/241598/intel-arc-b580-graphics/specifications.html
