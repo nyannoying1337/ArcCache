@@ -25,7 +25,7 @@ Read and acknowledge multiplayer/anti-cheat risk before applying. Detection is i
 
 Close the game and choose **Use system driver again**. Do not delete receipts or private folders manually. If verification fails, keep the files and receipt, read Activity, and import only the matching original receipt. Shader caches are not removed by rollback. The WinUI workflow never replaces system driver files and does not require Safe Mode; the older global recovery utility is a separate advanced tool. Use Intel's official installer for a damaged system package.
 
-After a driver update, the experimental app detects the changed active package while open and offers **Check new DLLs**. This is a read-only review, not automatic qualification. Unsupported packages stay blocked; return games to stock until a reviewed definition is available. The standard app has exact-version inspection at startup/refresh, without the experimental automatic update-review workflow. Xe3 is research-only; game patching remains disabled.
+After a driver update, the experimental app detects the changed active package while open and offers **Check new DLLs**. This is a read-only review, not automatic qualification. Unsupported packages stay blocked; return games to stock until a reviewed definition is available. The standard app has exact-version inspection at startup/refresh, without the experimental automatic update-review workflow. Xe3 game profiles are not qualified. The experimental Driver experiments page can inspect DLLs and prepare reviewed Xe3 device-test bundles.
 
 ## SCSKiller and monitoring
 
@@ -33,7 +33,7 @@ The optional bridge uses a separately installed, matching SCSKiller CLI chosen i
 
 ## What has actually been checked
 
-The user confirmed Witcher 3 gameplay with a private copy and Ready or Not menu loading with repaired original, 1 GiB and 4 GiB copies. Loaded paths/disk hashes and unchanged system-driver hashes were observed. The Ready or Not repair handles a known 32-bit bundled debug helper with exact qualified 64-bit helpers copied from the player's system; changing a cap alone does not migrate older setups.
+Gameplay loading was checked in Witcher 3 with a private copy. Menu loading was checked in Ready or Not with repaired original, 1 GiB and 4 GiB copies. Loaded paths/disk hashes and unchanged system-driver hashes were observed. The Ready or Not repair handles a known 32-bit bundled debug helper with exact qualified 64-bit helpers copied from the player's system; changing a cap alone does not migrate older setups.
 
 2/4 GiB constructors, patch hashes, tamper rejection, receipts/recovery, semantic ACL equality, consent gates, Steam fixtures, and quiet UI polling have automated checks. Actual capacity/growth effects remain unmeasured. 8/16 GiB passed isolated B580 D3D12 device/pipeline creation probes and reload-wrapper/unwind tests, **not** large-cache gameplay/reload. Very large files can require roughly their file size in contiguous RAM: the larger patch does not implement a low-memory Intel parser.
 

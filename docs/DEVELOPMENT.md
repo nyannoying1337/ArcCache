@@ -23,7 +23,7 @@ dotnet run --project src/ArcCache.WinUI/Tests/ArcCache.Tests.csproj -c Release -
 cmd /c src\ArcCache.WinUI\MonitorTests\build.cmd
 ```
 
-The first command includes read-only installed-driver checks and therefore expects the qualified package on the test PC. Run it without the worker argument for pure Core fixtures on an unsupported machine. Optional arguments are an existing matched-set receipt and the compiled `ScsBridgeFixture.cs` CLI fixture. Test directories are temporary; no real game/system patch is installed by these checks.
+The first command includes read-only installed-driver checks and therefore expects the qualified package in the B580 test configuration. Run it without the worker argument for pure Core fixtures on an unsupported machine. Optional arguments are an existing matched-set receipt and the compiled `ScsBridgeFixture.cs` CLI fixture. Test directories are temporary; no real game/system patch is installed by these checks.
 
 Engine tests and native research optionally require exact qualified original DLLs already on your own machine. Proprietary test inputs are not distributed. See [engine notes](../src/ArcCache.Engine/README.md) and [native test notes](../src/ArcCache.WinUI/NativeTests/README.md).
 
@@ -46,3 +46,7 @@ The experimental branch additionally has `research/LargeCache` and its reviewed 
 ## Documentation and preview releases
 
 User guides are under `src/ArcCache.WinUI/docs`. README artwork is an original SVG in `docs/assets`; no proprietary DLLs, personal receipts or diagnostic logs belong in Git. Preserve GPL/source attribution and runtime redistribution notices when packaging binaries.
+
+## Xe3 probe (experimental branch)
+
+Build `research/LargeCache/build-xe3-probe.cmd` before publishing to include `ArcCache.Xe3Probe.exe`. MSVC is required for this optional native component. The app itself still builds without it; preparing a device-test bundle then reports the missing component. See [test coverage](TESTING.md).
