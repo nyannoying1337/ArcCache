@@ -22,6 +22,14 @@
   <a href="https://github.com/nyannoying1337/ArcCache/issues"><strong>Report a problem</strong></a>
 </p>
 
+## Why Arc Cache exists
+
+Games compile shaders into code the GPU can use. Doing that during gameplay can cause pauses or stutter; a shader cache saves compiled results so they can be reused. [Intel's shader-compilation overview](https://www.intel.com/content/www/us/en/support/articles/000102440/graphics.html) explains why avoiding repeated compilation matters.
+
+The driver image reviewed by this project has a **512 MiB default cache-file limit**. If useful cached data is discarded or the cache is reset as it reaches its limit, that work may need to be compiled again. Arc Cache provides a GUI for testing larger, reviewed limits through per-game private driver copies, with verification and rollback instead of manual DLL edits.
+
+**What this could help with:** retaining more reusable shader data, reducing repeated compilation when revisiting content, and investigating cache-related stutter. These are the intended benefits, **not measured performance claims**. Larger limits do not fix every source of stutter, create shaders that have never been compiled, or guarantee higher FPS. Games can override driver defaults; larger caches also use more disk space and can increase memory/loading costs. See [test coverage and limitations](docs/TESTING.md).
+
 ## Pick your version
 
 | | Standard preview | Large-cache experimental preview |
