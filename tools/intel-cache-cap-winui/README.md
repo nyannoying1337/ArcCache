@@ -1,8 +1,8 @@
-# Arc Cache — standard preview
+# Arc Cache — large-cache experimental preview
 
 **Start with [the quick start](docs/QUICKSTART.md).** Read [Use private drivers explained](docs/PRIVATE-DRIVERS.md) before enabling the Windows setting. Download both variants from [GitHub Releases](https://github.com/nyannoying1337/ArcCache/releases).
 
-This branch builds `ArcCache.exe`. It provides original 512 MiB and reviewed 1/2/4 GiB presets; larger presets live on the separate large-cache-experimental branch. These are unsigned previews. Capacity effects are unmeasured; Ready or Not menu loading was confirmed with the repaired original, 1 GiB and 4 GiB setups. Unknown drivers stay blocked. App-only releases use a separately installed SCSKiller CLI.
+This branch builds `ArcCache.Experimental.exe`. It additionally supports experimental 8/16 GiB presets and read-only active-driver update review; see [larger-cap documentation](../intel-cache-large-research/README.md). These are unsigned previews. Capacity effects are unmeasured; Ready or Not menu loading was confirmed with the repaired original, 1 GiB and 4 GiB setups. Unknown drivers stay blocked. App-only releases use a separately installed SCSKiller CLI.
 
 The detailed notes below include earlier investigation results. The quick start and version-specific research notes describe the current supported workflow.
 

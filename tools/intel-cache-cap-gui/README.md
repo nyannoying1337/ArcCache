@@ -1,3 +1,5 @@
+> Experimental branch: see [larger-cache build and test instructions](../intel-cache-large-research/README.md). The 8/16 GiB variants are unverified in gameplay and preserve whole-file RAM allocation. Use the WinUI experimental executable for larger-cap installation and rollback.
+
 # Intel Arc Cache Cap — C# Windows application
 
 ## Matched private-driver experiment: gameplay confirmed

@@ -27,7 +27,7 @@ static class Tests {
             });
             Test("bounds and cap-only normalization",()=>{
                 foreach(int n in new[]{128,512,1024,2047,2048,4096})Check(Engine.Inspect(Engine.Patch(original,n)).MiB==n,"Cap recognition");
-                foreach(int n in new[]{0,127,2049,4095,4097,8192})Reject(()=>Engine.Patch(original,n));
+                foreach(int n in new[]{0,127,2049,4095,4097,8193,32768})Reject(()=>Engine.Patch(original,n));
             });
             Test("wide patches pin full hashes and round-trip to original / 1 GiB",()=>{
                 foreach(int cap in new[]{2048,4096}) {

@@ -41,6 +41,19 @@ Test("Installed wide cap is distinct from unmeasured runtime behavior",()=>{
     Check(SetupPresentation.From(state,false).Installed.StartsWith("4 GiB installed"),"Stale executable erased verified installed limit.");
     Check(SetupPresentation.From(state with{ContentsValid=false,Error="Hash mismatch"},true).Title=="Recover existing setup","Invalid disk files shown as applied.");
 });
+Test("Larger setup distinguishes an experimental test from inactive routing",()=>{
+    var receipt=new ReceiptState(4,"game.exe","game.exe.local",8192,"changed-runtime-unverified",new());
+    var state=new GameSetupState(true,true,true,true,receipt,null);
+    Check(SetupPresentation.From(state,true).Title=="Ready for experimental test","Untested larger patch was presented as proven gameplay.");
+    var inactive=SetupPresentation.From(state,true,false);
+    Check(inactive.Installed.StartsWith("8 GiB saved")&&inactive.Installed.Contains("inactive")&&inactive.Next.Contains("restart"),"Disabled routing was presented as an active installed patch.");
+});
+Test("Updated driver preserves saved cap but requires review",()=>{
+    var receipt=new ReceiptState(4,"game.exe","game.exe.local",8192,"changed-runtime-unverified",new());
+    var state=new GameSetupState(true,true,true,true,receipt,null);
+    var ui=SetupPresentation.From(state,true,true,false);
+    Check(ui.Installed.Contains("8 GiB saved")&&ui.Title=="Review the updated driver"&&ui.Next.Contains("system driver"),"Driver update erased setup or presented outdated private driver as ready.");
+});
 Test("Old private setup needing compatibility migration blocks patching without erasing disk state",()=>{
     var receipt=new ReceiptState(3,"game.exe","game.exe.local",4096,"changed-runtime-unverified",new());
     var state=new GameSetupState(true,true,true,true,receipt,null,true);
@@ -135,7 +148,7 @@ if(args.Length>0) {
     Test("Worker safety blocks an unavailable install",()=>{var reply=safety.RunAsync(new("Safety",SteamAppId:292030,InstallDirectory:Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString("N")))).GetAwaiter().GetResult();Check(reply.Ok&&!reply.Data.GetProperty("Allowed").GetBoolean()&&!reply.Data.GetProperty("ScanComplete").GetBoolean(),"Missing install classified as safe.");});
     Test("Worker validates existing private set READ ONLY",()=>{
         if(args.Length<2)return;var reply=safety.RunAsync(new("Validate",ReceiptPath:Path.GetFullPath(args[1]))).GetAwaiter().GetResult();Check(reply.Ok,"Live receipt validation failed: "+reply.Message);
-        var source=JsonSerializer.Deserialize<ReceiptState>(File.ReadAllText(args[1]))!;Check(reply.Data.GetProperty("MiB").GetInt32()==source.MiB,"Unexpected private cap.");
+        var expected=JsonSerializer.Deserialize<ReceiptState>(File.ReadAllText(args[1]))!;Check(reply.Data.GetProperty("MiB").GetInt32()==expected.MiB,"Worker cap differs from validated receipt.");
     });
     Test("Worker requires automatic original-control observation even with patch consent",()=>{
         if(args.Length<2)return;string temporary=Path.Combine(Path.GetTempPath(),"ArcControlGate-"+Guid.NewGuid()+".json");
@@ -157,7 +170,7 @@ if(args.Length>0) {
     });
     Test("Worker inspects original system driver READ ONLY",()=>{var reply=safety.RunAsync(new("Status")).GetAwaiter().GetResult();Check(reply.Ok&&reply.Data.GetProperty("Original").GetBoolean(),"Original system driver was not verified.");});
     Test("Worker refuses a missing recovery receipt",()=>{var reply=safety.RunAsync(new("Validate",ReceiptPath:Path.Combine(Path.GetTempPath(),Guid.NewGuid()+".json"))).GetAwaiter().GetResult();Check(!reply.Ok,"Missing receipt accepted.");});
-    Test("Game state recognizes the validated live limit and blocks duplicate preparation",()=>{
+    Test("Game state recognizes the validated live cap and blocks duplicate preparation",()=>{
         if(args.Length<2)return;
         var validated=safety.RunAsync(new("Validate",ReceiptPath:Path.GetFullPath(args[1]))).GetAwaiter().GetResult();string exe=validated.Data.GetProperty("Executable").GetString()!;
         var reply=safety.RunAsync(new("GameState",exe,Path.GetFullPath(args[1]))).GetAwaiter().GetResult();var state=GameSetupState.FromReply(reply);
