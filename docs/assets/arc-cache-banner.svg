@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="240" viewBox="0 0 1000 240" role="img" aria-labelledby="title desc">
+<title id="title">Arc Cache</title><desc id="desc">Per-game shader-cache controls for Intel Arc. Windows, WinUI 3, open source.</desc>
+<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#111922"/><stop offset="1" stop-color="#172d37"/></linearGradient><linearGradient id="a" x2="1" y2="1"><stop stop-color="#65deff"/><stop offset="1" stop-color="#1c90ed"/></linearGradient></defs>
+<rect width="1000" height="240" rx="18" fill="url(#bg)"/>
+<g fill="none" stroke="#315766" opacity=".55"><path d="M650 0v240M750 0v240M850 0v240M950 0v240M610 60h390M610 120h390M610 180h390"/></g>
+<rect x="48" y="62" width="104" height="104" rx="24" fill="url(#a)"/>
+<path d="M106 81 82 126h22l-8 25 31-44h-24z" fill="#102433"/>
+<text x="184" y="112" font-family="Segoe UI,Arial,sans-serif" font-size="48" font-weight="700" fill="#f4f8fa">Arc Cache</text>
+<text x="185" y="150" font-family="Segoe UI,Arial,sans-serif" font-size="22" fill="#c0d4dc">Per-game shader-cache controls for Intel Arc</text>
+<text x="185" y="183" font-family="Segoe UI,Arial,sans-serif" font-size="15" letter-spacing="2" fill="#63d9fa">WINDOWS · WINUI 3 · OPEN SOURCE</text>
+<g transform="translate(805 75)"><rect width="100" height="100" rx="17" fill="#142831" stroke="#4ba1b7"/><rect x="24" y="24" width="52" height="52" rx="8" fill="#234653" stroke="#61d9f9"/><path d="M36 37h28M36 49h28M36 61h18" stroke="#a6e9fa" stroke-width="4" stroke-linecap="round"/></g>
+</svg>
