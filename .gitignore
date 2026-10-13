@@ -1,0 +1,10 @@
+bin/
+obj/
+out/
+dist/
+native-build/
+*.dll
+*.exe
+*.log
+*.csv
+*.jsonl
