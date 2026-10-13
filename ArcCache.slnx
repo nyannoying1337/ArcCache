@@ -1,0 +1,10 @@
+<Solution>
+  <Configurations><Platform Name="x64" /></Configurations>
+  <Folder Name="/Source/">
+    <Project Path="src/ArcCache.WinUI/App/ArcCache.WinUI.csproj" />
+    <Project Path="src/ArcCache.WinUI/Core/ArcCache.Core.csproj" />
+  </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="src/ArcCache.WinUI/Tests/ArcCache.Tests.csproj" />
+  </Folder>
+</Solution>
