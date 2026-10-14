@@ -10,7 +10,7 @@ Both app versions offer **Graphics → Check support → Try patching**. Standar
 4. Arc Cache creates a **1 GiB test copy**, changing only the four-byte cache value. It compares all other bytes, checks copied files and source identity, then runs the same graphics check.
 5. The progress log and saved reports say whether each copy loaded and prepared one trivial compute shader. A pass does **not** establish actual cache capacity, game stability, or game support.
 
-Unknown versions remain blocked from normal game setup. This workflow only creates isolated test artifacts. It cannot enroll its own output as a supported driver, change Windows driver files, bypass signature/integrity enforcement, force a game's GPU preference, or disable anti-cheat. XE3 game support remains unverified.
+Unknown versions remain outside normal reviewed setup. After both tests pass, **Choose a game and use this copy** opens the [guided explicit game-trial workflow](GUIDED-GAME-SETUP.md). The graphics test itself only creates isolated artifacts. It cannot enroll its own output as a supported driver, change Windows driver files, bypass signature/integrity enforcement, force a game's GPU preference, or disable anti-cheat. XE3 game support remains unverified.
 
 ## Before testing
 
