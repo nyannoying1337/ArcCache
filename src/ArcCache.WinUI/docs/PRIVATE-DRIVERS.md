@@ -1,6 +1,6 @@
 # Private drivers: the one-time Windows setting
 
-**Enable Use private drivers once, then restart Windows.** This is required by this app's per-game routing workflow. Run Arc Cache as administrator yourself for this change only; normal play and normal app use do not need administrator rights. The app never opens an elevation prompt or enables this silently.
+**Enable Enable game-specific settings once, then restart Windows.** This is required by this app's per-game routing workflow. Run Arc Cache as administrator yourself for this change only; normal play and normal app use do not need administrator rights. The app never opens an elevation prompt or enables this silently.
 
 ## What it does
 
@@ -20,7 +20,7 @@ Turning the setting off and restarting removes the manifest override; it does no
 
 ## Undo one game
 
-Close the game and choose **Use system driver again** on its page. Arc Cache checks the saved receipt and file hashes, then removes only its owned private files. Leave the Windows setting alone if other games still use private copies. Shader caches are preserved. Missing receipts, unexpected files or changed hashes stop removal; use recovery options rather than deleting blindly.
+Close the game and choose **Use default settings** on its page. Arc Cache checks the saved receipt and file hashes, then removes only its owned private files. Leave the Windows setting alone if other games still use private copies. Shader caches are preserved. Missing receipts, unexpected files or changed hashes stop removal; use recovery options rather than deleting blindly.
 
 ## Undo the Windows setting
 

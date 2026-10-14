@@ -22,4 +22,4 @@ Settings exposes the one-time machine-wide private-routing setting and opt-in bo
 
 ## Experimental driver inspection
 
-Driver experiments can scan a selected DLL or the installed Xe3 DLL. Structural eligibility, reviewed patch bytes, isolated device results and game-profile qualification are shown separately. [Xe3 testing workflow](docs/XE3-EXPERIMENTS.md).
+Try a compatibility check can scan a selected DLL or the installed Xe3 DLL. Structural eligibility, reviewed patch bytes, isolated device results and game-profile qualification are shown separately. [Xe3 testing workflow](docs/XE3-EXPERIMENTS.md).

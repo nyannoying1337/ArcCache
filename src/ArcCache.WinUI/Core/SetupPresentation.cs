@@ -5,22 +5,22 @@ public sealed record SetupPresentation(string Installed, string Title, string Ne
     public static string Limit(int mib) => mib >= 1024 ? $"{mib / 1024} GiB" : $"{mib} MiB";
     public static SetupPresentation From(GameSetupState? state, bool detected,bool routingReady=true,bool driverCompatible=true) {
         if(state?.CompatibilityRepairRequired==true)
-            return new($"{Limit(state.Receipt!.MiB)} installed · compatibility update required", "Update the existing private setup", "Close the game. Choose Use system driver again, then prepare a fresh original 512 MiB copy. Changing the limit alone does not install the compatibility fix.", false);
+            return new($"{Limit(state.Receipt!.MiB)} set · setup needs updating", "Set up this game again", "Close the game. Choose Use default settings, then set it up again. Changing the size alone will not fix the old setup.", false);
         if (state?.Error != null || state?.FolderExists == true && !state.Configured)
-            return new("Setup needs recovery", "Recover existing setup", "Open recovery options below. Import the original receipt before changing this setup.", false);
+            return new("Setup needs attention", "Fix this setup", "Open Fix a setup or view details below. Use the saved setup record so Arc Cache can check which files belong to this game.", false);
         if (state?.Configured == true && state.Receipt is { } receipt) {
-            string installed = $"{Limit(receipt.MiB)} installed · private driver files verified";
-            if(!driverCompatible)return new($"{Limit(receipt.MiB)} saved · driver review required","Review the updated driver","Check new DLLs above, or use the system driver again. Your saved limit is retained.",false);
-            if(!routingReady)return new($"{Limit(receipt.MiB)} saved · routing inactive","Enable private drivers","Open Settings, enable Use private drivers and restart Windows. Your saved files remain; their presence does not prove the game loaded them.",false);
-            if (!detected) return new(installed, "Game update needs attention", "Return to the system driver before detecting this game's updated executable.", false);
+            string installed = $"{Limit(receipt.MiB)} set · setup files checked";
+            if(!driverCompatible)return new($"{Limit(receipt.MiB)} saved · graphics driver needs checking","Check your updated graphics driver","Choose Check support on the Graphics page, or use default settings for this game. Your selected size is still saved.",false);
+            if(!routingReady)return new($"{Limit(receipt.MiB)} saved · Windows setting is off","Enable game-specific settings","Open Settings, enable game-specific settings and restart Windows. Your selected size is still saved.",false);
+            if (!detected) return new(installed, "Game update needs attention", "Use default settings, then start the updated game so Arc Cache can find it again.", false);
             bool control = receipt.MiB == 512 && receipt.Status != "original-control-loading-verified";
-            if (control) return new(installed, "Step 2 of 3 · Test the original copy", "Play through Steam in DX12. Keep this app open; it checks loading automatically. Close the game when the check completes.", true);
-            if (receipt.MiB == 512) return new(installed, "Step 3 of 3 · Choose and apply your limit", "Original loading checked. Close the game, choose a limit below, and apply it.", false);
-            if(receipt.MiB>=8192)return new(installed,"Ready for experimental test","Launch in DX12 and enable the live overlay. Loading a large cache may use equally large RAM buffers. Use this experimental app to return to 4 GiB or the system driver.",false);
-            return new(installed, "Ready to play", "Play through Steam in DX12. You can check the running game’s driver below.", false);
+            if (control) return new(installed, "Step 2 of 3 · Check the first setup", "Start the game in DirectX 12 mode and keep Arc Cache open. It will check the new setup. Close the game after the check finishes.", true);
+            if (receipt.MiB == 512) return new(installed, "Step 3 of 3 · Choose your cache size", "The first setup loaded successfully. Close the game, choose a size below, and apply it.", false);
+            if(receipt.MiB>=8192)return new(installed,"Ready to try this setting","Start the game in DirectX 12 mode. Large caches can use lots of memory. Use this app to choose a smaller size or return to default settings.",false);
+            return new(installed, "Ready to play", "Play through Steam in DirectX 12 mode. Use Check game setup below if you want to verify which files loaded.", false);
         }
         return detected
-            ? new("System driver · no private setup", "Step 1 of 3 · Prepare this game", "Prepare an unchanged private copy first (about 608 MiB). Your selected limit is applied after the automatic loading check.", false)
-            : new("System driver · no private setup", "Step 1 of 3 · Detect this game", "Play through Steam in DX12 and leave it at the menu. This app finds its rendering executable automatically.", false);
+            ? new("Default settings · not set up", "Step 1 of 3 · Set up this game", "Arc Cache starts with an unchanged driver copy (about 608 MiB). Your chosen size is applied after that copy is checked.", false)
+            : new("Default settings · not set up", "Step 1 of 3 · Start this game", "Start the game in DirectX 12 mode and leave it at the menu. Arc Cache will find the files it needs.", false);
     }
 }

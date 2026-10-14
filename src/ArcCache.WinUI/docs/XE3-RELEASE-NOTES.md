@@ -1,6 +1,6 @@
 ## Experimental update: DLL inspection and Xe3 device tests
 
-Download **ArcCache-Experimental-Xe3-Preview-2026.10.13-Windows-x64.zip**, extract the whole folder, and run `ArcCache.Experimental.exe`. This unsigned Windows x64 build retains the existing Xe2 presets and adds a separate **Driver → Driver experiments** workflow.
+Download **ArcCache-Experimental-Xe3-Preview-2026.10.13-Windows-x64.zip**, extract the whole folder, and run `ArcCache.Experimental.exe`. This unsigned Windows x64 build retains the existing Xe2 presets and adds a separate **Graphics → Try a compatibility check** workflow.
 
 ### New workflow
 

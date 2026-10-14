@@ -10,7 +10,7 @@ class Request {
     public bool RiskConfirmed {get;set;}
     public bool ReadOnly {get;set;}
     public uint SteamAppId {get;set;}public string InstallDirectory {get;set;}
-    public string DriverFile {get;set;}public string Action {get;set;}public string Executable {get;set;}public string ReceiptPath {get;set;}public string SourceReceipt {get;set;}public string DriverFolder {get;set;}public int MiB {get;set;}public bool Confirmed {get;set;}
+    public string DriverFile {get;set;}public string AdapterId {get;set;}public string Action {get;set;}public string Executable {get;set;}public string ReceiptPath {get;set;}public string SourceReceipt {get;set;}public string DriverFolder {get;set;}public int MiB {get;set;}public bool Confirmed {get;set;}
 }
 class Worker {
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]static extern ulong GetTickCount64();
@@ -109,6 +109,7 @@ class Worker {
                 var modules=WindowsPlatform.ModulePaths(process.Id).ToArray();
                 if(!modules.Any(m=>Path.GetFileName(m).Equals("d3d12.dll",StringComparison.OrdinalIgnoreCase)))continue;
                 if(!modules.Any(m=>m.Equals(activeXe2,StringComparison.OrdinalIgnoreCase)))continue;
+                if(modules.Select(Path.GetFileName).Where(n=>DriverCatalog.Names.Contains(n,StringComparer.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).Count()!=1)continue;
                 RequireAmd64Exe(exe);Isolation.RequireNoLocalD3D12(exe);
                 if(Directory.Exists(exe+".local")||File.Exists(exe+".local"))continue;
                 RequireOriginalActivePackage();
@@ -163,7 +164,7 @@ class Worker {
             var receipt=Json.Deserialize<OverrideReceipt>(File.ReadAllText(IsolationControl.ReceiptPath));DateTime created;
             if(receipt!=null&&receipt.Status=="enabled-reboot-required"&&DateTime.TryParse(receipt.CreatedUtc,null,System.Globalization.DateTimeStyles.RoundtripKind,out created))reboot=created.ToUniversalTime()>DateTime.UtcNow.AddMilliseconds(-(double)GetTickCount64());
         }
-        return new {DriverFolder=folder,Version=package.Version,Adapter=package.Adapter,Hash=xe2.Hash,Original=xe2.State=="QualifiedOriginal",Compatible=qualified,CompatibilityReason=reason,Files=files,IdentityTag=currentIdentity,DeveloperOverride=setting!=null&&Convert.ToInt32(setting)==1,RebootRequired=reboot,Administrator=IsolationControl.Administrator};
+        return new {DriverFolder=folder,Version=package.Version,Adapter=package.Adapter,AdapterId=package.Id,Adapters=DriverCatalog.Packages(),Hash=xe2.Hash,Original=xe2.State=="QualifiedOriginal",Compatible=qualified,CompatibilityReason=reason,Files=files,IdentityTag=currentIdentity,DeveloperOverride=setting!=null&&Convert.ToInt32(setting)==1,RebootRequired=reboot,Administrator=IsolationControl.Administrator};
     }
     [STAThread]static int Main(string[] args) {
         try {
@@ -178,6 +179,7 @@ class Worker {
                 case "Safety":data=Safety(r);message="Fresh install and Steam safety checks completed.";break;
                 case "DiscoverGame":data=DiscoverGame(r);message="Automatic game discovery completed; game and driver files unchanged.";break;
                 case "VerifyControl":data=VerifyControl(r);message="Original-control observation completed; game files unchanged.";break;
+                case "SelectGraphics":Consent(r);DriverCatalog.Select(r.AdapterId);data=DriverIdentity();message="Graphics chip selected for checks. Windows and game GPU preferences were not changed.";break;
                 case "Status":data=Status();message="Installed driver compatibility inspected.";break;
                 case "DriverIdentity":data=DriverIdentity();message="Driver metadata checked; no DLL hashing or writes.";break;
                 case "CheckDriverCompatibility":data=Status(true);message="Read-only DLL, signature and full-package compatibility review completed. Signature candidates do not enable patches.";break;

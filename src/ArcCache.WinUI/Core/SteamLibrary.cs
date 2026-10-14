@@ -6,7 +6,7 @@ namespace ArcCache.Core;
 public sealed record SteamGame(uint AppId, string Name, string InstallDirectory, string? Artwork, string? DetectedExecutable=null, bool Detected=false, string? Icon=null, IReadOnlyList<string>? ArtworkFallbacks=null) {
     public bool Supported => Detected;
     public string? SupportedExecutable => DetectedExecutable;
-    public string SupportLabel => Detected?"Ready to set up":"Launch in DX12 to detect";
+    public string SupportLabel => Detected?"Ready to set up":"Start in DirectX 12 first";
     public IReadOnlyList<string> ArtworkSources => (Artwork is null?Array.Empty<string>():new[]{Artwork}).Concat(ArtworkFallbacks??Array.Empty<string>()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     public IReadOnlyList<string> IconSources => (Icon is null?Array.Empty<string>():new[]{Icon}).Concat(ArtworkSources).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 }

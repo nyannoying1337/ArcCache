@@ -102,7 +102,7 @@ The read-only desktop overlay now accepts any detected game executable rather th
 
 ## Driver-review and Xe3 follow-up
 
-Implemented active-device inventory, metadata update detection and explicit compatibility review. Simulated update UI QA confirms Apply=false, private Launch=false, stock Recovery=true and a visible Check new DLLs action. The saved cap is retained rather than reported as stock. The simulation changes UI state only; registry/driver/game files were not changed. Ten catalogue tests pass, including a matching signature in a tampered image remaining blocked. Read-only worker requests with mutation consent are also refused.
+Implemented active-device inventory, metadata update detection and explicit compatibility review. Simulated update UI QA confirms Apply=false, private Launch=false, stock Recovery=true and a visible Check support action. The saved cap is retained rather than reported as stock. The simulation changes UI state only; registry/driver/game files were not changed. Ten catalogue tests pass, including a matching signature in a tampered image remaining blocked. Read-only worker requests with mutation consent are also refused.
 
 Xe3 original image: SHA-256 029E091F5B67A7418B39900E2AC4EAC9EF64767595E0138FF6569CC42FEB4911; size 42,191,848 bytes; constructor raw 0x1900E0, RVA 0x190CE0; cap immediate raw 0x1900F0. One executable-section signature match. Independent disassembly confirms the 512 MiB qword cap, 4 GiB neighbor and constructor boundaries. Constructor-only samples:
 - 2 GiB SHA-256 A9ADC9BEB2C9B3C4A0CADA7C057DA16F3EF866C0BDE0B1CA44F965C79FC5E686

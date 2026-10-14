@@ -1,6 +1,6 @@
 # Reporting a problem
 
-1. Open Settings → Troubleshooting and turn on **Detailed diagnostic logging**. Alternatively launch the EXE with `--debug` to enable it for that session without saving the preference.
+1. Open Settings → Troubleshooting and turn on **Save extra troubleshooting details**. Alternatively launch the EXE with `--debug` to enable it for that session without saving the preference.
 2. Reproduce the problem once. Open Activity for the ordinary action result; diagnostics add worker requests/results, timings, observed driver facts and full exception details.
 3. Choose **Open logs folder**. Review `diagnostics.jsonl` and `diagnostics.jsonl.previous` before sharing. They can contain your Windows username, game/driver/receipt paths and file hashes. Normal action logs and overlay CSVs are in the same folder. Never share account tokens or unrelated files.
 4. Turn detailed logging off afterward. Existing logs are retained for manual review/removal. Disabling the toggle does not remove previous logs. No automatic upload or telemetry is implemented.

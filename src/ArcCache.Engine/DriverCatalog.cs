@@ -1,6 +1,6 @@
 ﻿using System;using System.IO;using System.Linq;using System.Collections.Generic;using System.Diagnostics;using Microsoft.Win32;using System.Runtime.InteropServices;using System.Text;
 namespace ArcCap {
-public class AdapterPackage {public string Adapter,Version,Folder;}
+public class AdapterPackage {public string Id,Adapter,Version,Folder;}
 public class DriverFileReview {public string Name,Version,Hash,Signature,State,Error;public long Size;public int CandidateCount;public int[] CandidateOffsets;public bool PatchEnabled,StructurallyPatchable,ExperimentalTestEnabled;public string Assessment;}
 public static class DriverCatalog {
  public const string KnownVersion="32.0.101.9034",Xe3Original="029E091F5B67A7418B39900E2AC4EAC9EF64767595E0138FF6569CC42FEB4911";
@@ -11,32 +11,37 @@ public static class DriverCatalog {
  [DllImport("setupapi.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern bool SetupDiGetDeviceRegistryProperty(IntPtr set,ref DeviceInfo info,uint property,out uint type,byte[] buffer,uint size,out uint required);
  [DllImport("setupapi.dll")]static extern bool SetupDiDestroyDeviceInfoList(IntPtr set);
  [DllImport("cfgmgr32.dll")]static extern uint CM_Get_DevNode_Status(out uint status,out uint problem,uint node,uint flags);
- static HashSet<string> ActiveClassKeys(){
+ [DllImport("setupapi.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern bool SetupDiGetDeviceInstanceId(IntPtr set,ref DeviceInfo info,StringBuilder value,uint size,out uint required);
+ static Dictionary<string,string> ActiveClassKeys(){
   Guid guid=new Guid("4d36e968-e325-11ce-bfc1-08002be10318");IntPtr set=SetupDiGetClassDevs(ref guid,null,IntPtr.Zero,2);
-  if(set==new IntPtr(-1))throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());var keys=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+  if(set==new IntPtr(-1))throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());var keys=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
   try{for(uint i=0;;i++){var info=new DeviceInfo{Size=(uint)Marshal.SizeOf(typeof(DeviceInfo))};if(!SetupDiEnumDeviceInfo(set,i,ref info)){if(Marshal.GetLastWin32Error()==259)break;throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());}
    uint status,problem;if(CM_Get_DevNode_Status(out status,out problem,info.DevInst,0)!=0||(status&8)==0)continue;
    uint type,required;byte[] value=new byte[1024];if(!SetupDiGetDeviceRegistryProperty(set,ref info,9,out type,value,(uint)value.Length,out required)||type!=1||required>value.Length)continue;
    string name=Encoding.Unicode.GetString(value,0,(int)required).TrimEnd('\0');string prefix="{"+guid.ToString()+"}\\";
-   if(name.StartsWith(prefix,StringComparison.OrdinalIgnoreCase)){string sub=name.Substring(prefix.Length);if(sub.Length==4&&sub.All(Char.IsDigit))keys.Add(sub);}
+   if(name.StartsWith(prefix,StringComparison.OrdinalIgnoreCase)){string sub=name.Substring(prefix.Length);if(sub.Length==4&&sub.All(Char.IsDigit)){var instance=new StringBuilder(1024);uint length;if(SetupDiGetDeviceInstanceId(set,ref info,instance,(uint)instance.Capacity,out length))keys[sub]=instance.ToString();}}
   }}finally{SetupDiDestroyDeviceInfoList(set);}return keys;
  }
  public static List<AdapterPackage> Packages(){
   var active=ActiveClassKeys();var result=new List<AdapterPackage>();const string root=@"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
   using(var hive=RegistryKey.OpenBaseKey(RegistryHive.LocalMachine,RegistryView.Registry64))using(var display=hive.OpenSubKey(root)){
    if(display==null)return result;
-   foreach(string sub in display.GetSubKeyNames().Where(n=>active.Contains(n)))using(var key=display.OpenSubKey(sub)){
+   foreach(string sub in display.GetSubKeyNames().Where(n=>active.ContainsKey(n)))using(var key=display.OpenSubKey(sub)){
     string adapter=key.GetValue("DriverDesc") as string,provider=key.GetValue("ProviderName") as string;
     if(((adapter??"")+" "+(provider??"")).IndexOf("Intel",StringComparison.OrdinalIgnoreCase)<0)continue;
     object raw=key.GetValue("UserModeDriverName");string[] names=raw as string[]??(raw is string?new[]{(string)raw}:new string[0]);
     foreach(string name in names){string path=Environment.ExpandEnvironmentVariables(name);if(!Path.IsPathRooted(path)||!(Path.GetFileName(path).Equals("igd12umd64.dll",StringComparison.OrdinalIgnoreCase)||Names.Contains(Path.GetFileName(path),StringComparer.OrdinalIgnoreCase)))continue;
-     string folder=Path.GetDirectoryName(Path.GetFullPath(path));try{Engine.CheckPath(folder);}catch(IOException){continue;}catch(UnauthorizedAccessException){continue;}result.Add(new AdapterPackage{Adapter=adapter??"Intel GPU",Version=key.GetValue("DriverVersion") as string,Folder=folder});break;}
+     string folder=Path.GetDirectoryName(Path.GetFullPath(path));try{Engine.CheckPath(folder);}catch(IOException){continue;}catch(UnauthorizedAccessException){continue;}result.Add(new AdapterPackage{Id=active[sub],Adapter=adapter??"Intel GPU",Version=key.GetValue("DriverVersion") as string,Folder=folder});break;}
    }
   }return result;
  }
- public static AdapterPackage Selected(){var packages=Packages();return packages.FirstOrDefault(p=>p.Adapter.IndexOf("B580",StringComparison.OrdinalIgnoreCase)>=0)??packages.FirstOrDefault();}
+ public static string SelectionPath{get{return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap","graphics-selection.json");}}
+ public static AdapterPackage Choose(IEnumerable<AdapterPackage> packages,string id){var list=packages.ToArray();return list.FirstOrDefault(p=>!String.IsNullOrEmpty(id)&&String.Equals(p.Id,id,StringComparison.OrdinalIgnoreCase))??list.FirstOrDefault();}
+ public static AdapterPackage Selected(){string id=null;try{if(File.Exists(SelectionPath)){Engine.CheckPath(SelectionPath);if(new FileInfo(SelectionPath).Length<=8192)id=new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<string>(File.ReadAllText(SelectionPath));}}catch(IOException){}catch(ArgumentException){}return Choose(Packages(),id);}
+ public static void Select(string id){if(!Packages().Any(p=>String.Equals(p.Id,id,StringComparison.OrdinalIgnoreCase)))throw new InvalidDataException("This graphics chip is no longer available. Refresh the list and choose another.");string root=Path.GetDirectoryName(SelectionPath);Directory.CreateDirectory(root);Engine.CheckPath(root);if(File.Exists(SelectionPath))Engine.CheckPath(SelectionPath);File.WriteAllText(SelectionPath,new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(id));}
+
  public static string Identity(AdapterPackage p){
-  if(p==null)return "no-active-intel-package";var fields=new List<string>{p.Adapter,p.Version,p.Folder};
+  if(p==null)return "no-active-intel-package";var fields=new List<string>{p.Id,p.Adapter,p.Version,p.Folder};
   foreach(string name in MatchedSet.Originals.Keys.Concat(Names).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n=>n,StringComparer.OrdinalIgnoreCase)){
    string file=Path.Combine(p.Folder,name);var info=new FileInfo(file);fields.Add(name+":"+(info.Exists?info.Length+":"+info.LastWriteTimeUtc.Ticks:"missing"));
   }return Engine.Hash(System.Text.Encoding.UTF8.GetBytes(String.Join("\n",fields)));
@@ -63,15 +68,16 @@ public static class DriverCatalog {
    else r.State="Unqualified";
    r.StructurallyPatchable=r.CandidateCount==1;
    r.ExperimentalTestEnabled=r.Name.Equals("igd12um64xe3.dll",StringComparison.OrdinalIgnoreCase)&&r.Hash==Xe3Original&&r.CandidateCount==1&&r.CandidateOffsets[0]==0x1900e0;
-   r.Assessment=r.ExperimentalTestEnabled?"Reviewed Xe3 constructor: isolated device-test bundles are available. Runtime and game compatibility are not established.":r.PatchEnabled?"Reviewed Xe2 image; per-game deployment still requires the matching complete package.":r.CandidateCount==1?"A matching cache constructor was found. This is a structural candidate, not a qualified patch definition.":r.CandidateCount>1?"Multiple constructor matches: ambiguous, do not patch.":"No matching cache constructor found.";
+   r.Assessment=r.ExperimentalTestEnabled?"This driver file can be tested. Create a separate test copy, then run the graphics check. Games and larger caches are not verified yet.":r.PatchEnabled?"This file matches a supported version. The other files in the installed driver must also match before a game can be set up.":r.CandidateCount==1?"This file looks similar to a supported version, but it still needs review before a test copy can be offered. No files were changed.":r.CandidateCount>1?"The check found more than one possible location to change. This build cannot safely choose one; keep default settings.":"This build does not recognise a supported cache setting in this file. Keep default settings.";
    if(signatures)r.Signature=WindowsPlatform.EmbeddedSignature(file);
   }catch(Exception e){r.Error=e.Message;r.State="Unavailable";r.Assessment="The DLL could not be inspected: "+e.Message;r.ExperimentalTestEnabled=false;r.PatchEnabled=false;}return r;
  }
- public static bool CohortQualified(AdapterPackage p,out string reason){
+ public static bool CohortQualified(AdapterPackage p,out string reason){return CohortQualified(p,delegate(string file){Engine.CheckPath(file);return IsolationControl.FileHash(file);},out reason);}
+ public static bool CohortQualified(AdapterPackage p,Func<string,string> readHash,out string reason){
   if(p==null){reason="No active Intel package found.";return false;}
-  if(p.Adapter.IndexOf("B580",StringComparison.OrdinalIgnoreCase)<0||p.Version!=KnownVersion){reason="Adapter/driver version has no qualified private-copy definition.";return false;}
-  foreach(var entry in MatchedSet.Originals){string file=Path.Combine(p.Folder,entry.Key);try{Engine.CheckPath(file);if(IsolationControl.FileHash(file)!=entry.Value){reason="Unqualified package file: "+entry.Key;return false;}}catch(Exception e){reason=e.Message;return false;}}
-  reason="Exact supported Xe2 package; all private-copy dependencies match.";return true;
+  if(p.Version!=KnownVersion){reason="This driver version is not supported yet. Your normal graphics settings are unchanged.";return false;}
+  foreach(var entry in MatchedSet.Originals){string file=Path.Combine(p.Folder,entry.Key);try{if(readHash(file)!=entry.Value){reason="Unqualified package file: "+entry.Key;return false;}}catch(Exception e){reason=e.Message;return false;}}
+  reason="The driver files match a supported version. Set up a game to check that its own copy works.";return true;
  }
 }
 }

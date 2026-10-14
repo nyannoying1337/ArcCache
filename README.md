@@ -34,12 +34,12 @@ The driver image reviewed by this project has a **512 MiB default cache-file lim
 
 | | Standard preview | Large-cache experimental preview |
 | --- | --- | --- |
-| Download | [Standard release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-standard-preview-2026.10.13) | [Experimental release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-experimental-xe3-preview-2026.10.13) |
+| Download | [Standard release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-standard-preview-2026.10.14) | [Experimental release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-experimental-preview-2026.10.14) |
 | Presets | Original 512 MiB · 1 · 2 · 4 GiB | Standard presets + 8 · 16 GiB |
 | Source | [`main`](https://github.com/nyannoying1337/ArcCache/tree/main/src) | [`large-cache-experimental`](https://github.com/nyannoying1337/ArcCache/tree/large-cache-experimental/src) |
 | Start here if… | You want the standard workflow | You want larger-limit experiments, DLL scans and Xe3 device tests |
 
-**Currently supported:** the exact qualified **Intel Arc B580 / Xe2 driver 32.0.101.9034** package. Unknown packages stay blocked. Xe3 game profiles are not qualified; the experimental build offers isolated Xe3 device tests.
+**Driver support:** game setups require the exact reviewed **Xe2 driver 32.0.101.9034 files** and a matching running game. Active built-in and add-in Intel graphics can be selected; the GPU model name no longer decides eligibility. Unknown files stay blocked. Xe3 offers a separate graphics check in the preview build, not a qualified game setup.
 
 > **These are unsigned previews.** Loading tests do not prove effective shader-cache capacity. 8/16 GiB gameplay and large-cache reload remain unverified; a large cache can require roughly its size in contiguous RAM. [Test coverage and compatibility](docs/TESTING.md).
 
@@ -48,7 +48,7 @@ The driver image reviewed by this project has a **512 MiB default cache-file lim
 ## Get started
 
 1. **Download and extract the entire ZIP.** Open `ArcCache.exe` or `ArcCache.Experimental.exe`. No Python, terminal commands or .NET SDK are needed to run it.
-2. **Enable “Use private drivers” once.** Manually run the app as administrator for this setting, confirm, then restart Windows. Use the app normally afterward.
+2. **Enable “Enable game-specific settings” once.** Manually run the app as administrator for this setting, confirm, then restart Windows. Use the app normally afterward.
 3. **Select a Steam game and launch DX12.** Leave it at the menu so Arc Cache can detect its actual rendering executable.
 4. **Close the game and prepare its original private copy.** Launch again with the app open for the automatic loading check, then close the game.
 5. **Choose and apply a limit.** Play normally through Steam. Arc Cache can be closed unless you want its overlay.
@@ -69,7 +69,7 @@ The driver image reviewed by this project has a **512 MiB default cache-file lim
 
 Arc Cache creates a verified driver set in **`<game.exe>.local`**, beside the game's rendering executable. The one-time Windows setting lets manifest-bearing applications use these private DLLs. Games without a private setup keep using the installed driver.
 
-The setting is **machine-wide** and can also affect other `.local` apps. To undo **one game**, close it and choose **Use system driver again**. You do not need to toggle the Windows setting or delete shader caches. [Routing, restart and restore details](src/ArcCache.WinUI/docs/PRIVATE-DRIVERS.md).
+The setting is **machine-wide** and can also affect other `.local` apps. To undo **one game**, close it and choose **Use default settings**. You do not need to toggle the Windows setting or delete shader caches. [Routing, restart and restore details](src/ArcCache.WinUI/docs/PRIVATE-DRIVERS.md).
 
 ## Source code & development
 
@@ -91,13 +91,19 @@ dotnet publish src/ArcCache.WinUI/App/ArcCache.WinUI.csproj -c Release -p:Platfo
 
 ## Xe3 and new driver DLLs
 
-The experimental build can **inspect the DLL itself** and distinguish a structural candidate from a reviewed patch definition. Its Driver experiments page offers original/1/2/4 GiB isolated tests for the reviewed Xe3 image. The development machine does not need an Xe3 GPU; the tester's machine does.
+The experimental build can **inspect the DLL itself** and distinguish a structural candidate from a reviewed patch definition. Its Try a compatibility check page offers original/1/2/4 GiB isolated tests for the reviewed Xe3 image. The development machine does not need an Xe3 GPU; the tester's machine does.
 
 A matching pattern alone does not qualify an unknown driver. Device tests leave games and the installed driver untouched, and do not establish per-game support or effective capacity. [Testing details](docs/TESTING.md).
 
+## Built-in Intel graphics
+
+Open **Graphics**, then choose the Intel graphics chip your game uses. Built-in chips are included in detection and selection; this does not change Windows' choice of GPU for the game.
+
+Game setup depends on the actual driver files and observed game driver, not a B580-only model list. Matching reviewed Xe2 files can use the normal setup workflow. Reviewed Xe3 files can use the preview version's separate graphics check. Older HD/UHD/Iris or other unknown driver images may be detected but remain unsupported for patching. Positive gameplay tests on integrated hardware have not been performed. [Support details](docs/INTEGRATED-GRAPHICS.md).
+
 ## Need help?
 
-Turn on **Settings → Troubleshooting → Detailed diagnostic logging**, reproduce the problem once, then choose **Open logs folder**. `--debug` enables logging for one session. Logs stay on your PC; review usernames and paths before sharing.
+Turn on **Settings → Troubleshooting → Save extra troubleshooting details**, reproduce the problem once, then choose **Open logs folder**. `--debug` enables logging for one session. Logs stay on your PC; review usernames and paths before sharing.
 
 [Reporting guide](src/ArcCache.WinUI/docs/TROUBLESHOOTING.md) · [Open an issue](https://github.com/nyannoying1337/ArcCache/issues)
 

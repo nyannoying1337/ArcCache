@@ -6,7 +6,7 @@ Download `ArcCache-Experimental-2026.10.13-Windows-x64.zip`, extract the complet
 
 Standard presets plus experimental 8/16 GiB, active-driver update detection/read-only review, and a broader external overlay. Only the exact qualified Intel Arc B580 Xe2 32.0.101.9034 package is supported. Unknown versions remain blocked even if a byte pattern matches. Xe3 DLL inspection and reviewed isolated device tests are experimental; per-game Xe3 profiles are not qualified.
 
-The routing setting now says **Use private drivers** and explains when it is required. On/off/restart-required statuses are distinct. A saved limit stays visible when routing is inactive; private launch is blocked until ready. One-game rollback is separate from restoring the machine-wide setting.
+The routing setting now says **Enable game-specific settings** and explains when it is required. On/off/restart-required statuses are distinct. A saved limit stays visible when routing is inactive; private launch is blocked until ready. One-game rollback is separate from restoring the machine-wide setting.
 
 ## Start here
 
@@ -24,7 +24,7 @@ The optional SCSKiller bridge remains **stock-driver-only**; private-cap compila
 
 ## Roll back
 
-Close the game and choose **Use system driver again**. Files/receipt must verify; extra or altered files stop removal. Keep receipts/backups. Shader caches are preserved. Use the experimental app to roll back 8/16 GiB; standard rejects those images. Do not run both apps together because they share recovery data. No proprietary Intel or Windows debug-helper DLLs are distributed.
+Close the game and choose **Use default settings**. Files/receipt must verify; extra or altered files stop removal. Keep receipts/backups. Shader caches are preserved. Use the experimental app to roll back 8/16 GiB; standard rejects those images. Do not run both apps together because they share recovery data. No proprietary Intel or Windows debug-helper DLLs are distributed.
 
 [Source and build instructions](https://github.com/nyannoying1337/ArcCache/tree/large-cache-experimental/src/ArcCache.WinUI) · [Experimental research/build notes](https://github.com/nyannoying1337/ArcCache/tree/large-cache-experimental/research/LargeCache).
 
