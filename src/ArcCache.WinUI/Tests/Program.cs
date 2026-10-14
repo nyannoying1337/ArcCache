@@ -16,6 +16,16 @@ Test("Independent app instances do not collide or fail operations when a log is 
         Check(File.ReadAllText(second.LogPath).Contains("still works"),"Another instance stopped logging.");
     }finally{Directory.Delete(root,true);}
 });
+Test("The guide provides one next action from discovery to playing and handles older setups",()=>{
+ Check(GameGuide.From(null,false,true,false,true).Action=="Launch","Passing a driver test leaves game discovery without an action.");
+ Check(GameGuide.From(null,true,true,false,true).Action=="Prepare","Detected game does not offer setup.");
+ Check(GameGuide.From(null,true,false,false,true).Action=="Settings","Windows setup step missing.");
+ var receipt=new ReceiptState(5,"game.exe","game.exe.local",512,"prepared-runtime-unverified",new(),true);var state=new GameSetupState(true,true,true,true,receipt,null);
+ Check(GameGuide.From(state,true,true,true,true).Title.StartsWith("Step 3")&&GameGuide.From(state,true,true,true,true).Action=="Launch","Unchanged game copy does not lead to a loading check.");
+ state=state with{Receipt=receipt with{Status="original-control-loading-verified"}};Check(GameGuide.From(state,true,true,true,true).Action=="Apply","Verified game control does not lead to applying the size.");
+ state=state with{Receipt=receipt with{MiB=1024}};Check(GameGuide.From(state,true,true,true,true).Title.Contains("ready to try")&&GameGuide.From(state,true,true,true,true).Action=="Launch","Patched game does not offer play.");
+ Check(GameGuide.From(state,true,true,false,true).Action=="Restore","Older setup has no safe next action.");
+});
 Test("Plain game checks distinguish an observed copy from cache performance",()=>{
     string exe=@"C:\Games\Example\game.exe";
     Check(PlainLanguage.GameCheck("Game is not running.",exe).StartsWith("Start this game"),"Stopped game falsely reports a setup.");
@@ -88,7 +98,7 @@ Test("Setup workflow advances from detection through control to patch",()=>{
     var receipt=new ReceiptState(3,"game.exe","game.exe.local",512,"prepared-runtime-unverified",new());
     var state=new GameSetupState(true,true,true,true,receipt,null);
     Check(SetupPresentation.From(state,true).WaitingForControl,"Original control check bypassed.");
-    Check(SetupPresentation.From(state with{Receipt=receipt with{Status="original-control-loading-verified"}},true).Title.Contains("Step 3"),"Verified control still waiting.");
+    Check(SetupPresentation.From(state with{Receipt=receipt with{Status="original-control-loading-verified"}},true).Title.Contains("Apply your cache size"),"Verified control still waiting.");
     Check(SetupPresentation.From(state with{FolderExists=false,Receipt=receipt with{Status="removed"}},true).Title.Contains("Set up this game"),"Removed setup shown as installed.");
 });
 Test("Steam artwork resolves flat, direct app-ID and hashed folder assets with icon fallbacks",()=>{
@@ -157,6 +167,9 @@ if(args.Length>0) {
         var refused=safety.RunAsync(new("TryDriverTrial",Confirmed:true)).GetAwaiter().GetResult();Check(!refused.Ok&&refused.Message.Contains("Risk acknowledgment"),"Risk consent bypassed.");
         refused=safety.RunAsync(new("TryDriverTrial",Confirmed:true,RiskConfirmed:true,ReadOnly:true)).GetAwaiter().GetResult();Check(!refused.Ok&&refused.Message.Contains("Read-only"),"Read-only test created files.");
     });
+    Test("Game trials require separate consent and read-only requests cannot prepare them",()=>{
+ foreach(string action in new[]{"PrepareGameTrial","ChangeGameTrial"}){var denied=safety.RunAsync(new(action,Confirmed:true)).GetAwaiter().GetResult();Check(!denied.Ok&&denied.Message.Contains("risk"),"Game trial risk consent was bypassed.");denied=safety.RunAsync(new(action,Confirmed:true,RiskConfirmed:true,ReadOnly:true)).GetAwaiter().GetResult();Check(!denied.Ok&&denied.Message.Contains("Read-only"),"Read-only game trial mutated files.");}
+ });
     Test("Graphics statistics separate whole-PC RAM from shared disk files",()=>{var snapshot=safety.RunAsync(new("GraphicsStats",ReadOnly:true)).GetAwaiter().GetResult();Check(snapshot.Ok&&snapshot.Data.GetProperty("RamTotal").GetUInt64()>=snapshot.Data.GetProperty("RamAvailable").GetUInt64()&&snapshot.Data.GetProperty("DiskBytes").GetInt64()>=0,"Invalid memory/cache snapshot.");});
     Test("Worker refuses unknown operations without changes",()=>{var reply=safety.RunAsync(new("UnknownOperation")).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Unknown action"),"Unknown operation accepted.");});
     Test("Worker refuses all mutation kinds without explicit confirmation",()=>{foreach(string action in new[]{"Prepare","Change","Remove","Import","EnableOverride","RestoreOverride","SelectGraphics","CreateXe3Experiment","RunXe3Experiment"}){var reply=safety.RunAsync(new(action)).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Explicit confirmation"),"Mutation accepted without confirmation: "+action);}});

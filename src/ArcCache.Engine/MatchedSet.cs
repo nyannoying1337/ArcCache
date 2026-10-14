@@ -11,12 +11,13 @@ public class MatchedSetReceipt {
     public int Schema {get;set;} public string Executable {get;set;} public string Folder {get;set;}
     public int MiB {get;set;} public string Status {get;set;} public Dictionary<string,string> Files {get;set;}
     public MatchedSet.ProfileInfo Game {get;set;}
+    public bool Trial {get;set;}public bool DebugFixed {get;set;}public string TrialReceipt {get;set;}public string Driver {get;set;}public string OriginalHash {get;set;}public string TrialPatchedHash {get;set;}public Dictionary<string,string> OriginalFiles {get;set;}
 }
 public static class MatchedSet {
     public const string GameHash="2DF765398A3D1F165DB418271BE7200178320A4466817379F2FA0DC0001FB101";
     public class ProfileInfo {
         public uint AppId;public string Name,RelativeExecutable,Hash,Launcher;
-        public int Schema;public string Root,ObservedDriverHash,ObservedUtc;
+        public int Schema;public string Root,ObservedDriverHash,ObservedUtc,TrialReceipt;
     }
     static readonly ProfileInfo[] Profiles={
         new ProfileInfo{AppId=292030,Name="Witcher",RelativeExecutable=@"bin\x64_dx12\witcher3.exe",Hash=GameHash}
@@ -24,7 +25,7 @@ public static class MatchedSet {
     public static string ProfileDirectory {get{return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap","profiles");}}
     public static string ProfilePath(uint appId){return Path.Combine(ProfileDirectory,"steam-"+appId+".json");}
     public static string ProfileExecutable(ProfileInfo p) {
-        Require(p!=null&&p.Schema==1&&p.AppId>0&&p.ObservedDriverHash==Engine.Original&&p.Hash!=null&&System.Text.RegularExpressions.Regex.IsMatch(p.Hash,"\\A[0-9A-F]{64}\\z"),"Invalid observed game profile.");
+        Require(p!=null&&(p.Schema==1||p.Schema==2)&&p.AppId>0&&(p.Schema==1?p.ObservedDriverHash==Engine.Original:!String.IsNullOrWhiteSpace(p.TrialReceipt)&&System.Text.RegularExpressions.Regex.IsMatch(p.ObservedDriverHash??"","\\A[0-9A-F]{64}\\z"))&&p.Hash!=null&&System.Text.RegularExpressions.Regex.IsMatch(p.Hash,"\\A[0-9A-F]{64}\\z"),"Invalid observed game profile.");
         Require(!String.IsNullOrWhiteSpace(p.Root)&&!String.IsNullOrWhiteSpace(p.RelativeExecutable)&&!Path.IsPathRooted(p.RelativeExecutable),"Invalid profile paths.");
         string root=Path.GetFullPath(p.Root).TrimEnd(Path.DirectorySeparatorChar),exe=Path.GetFullPath(Path.Combine(root,p.RelativeExecutable));
         Require(exe.StartsWith(root+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase)&&Path.GetExtension(exe).Equals(".exe",StringComparison.OrdinalIgnoreCase),"Observed executable escaped its game installation.");return exe;
@@ -79,10 +80,10 @@ public static class MatchedSet {
             {"ze_loader.dll","B902825D0193E1C86D8CC628913C7869A87B2FB1DBF81F86E0C20422269EA0A4"},
     };
     static void Require(bool yes,string message){if(!yes)throw new InvalidDataException(message);}
-    static void Closed(string executable){var profile=Profile(executable);foreach(string name in new[]{Path.GetFileNameWithoutExtension(executable),profile.Launcher}.Where(n=>n!=null))foreach(var process in Process.GetProcessesByName(name))using(process)throw new InvalidOperationException("Close "+profile.Name+" before changing its private set.");}
-    public static void ValidateGame(string executable) {
+    static void Closed(string executable,ProfileInfo observed=null){var profile=observed??Profile(executable);foreach(string name in new[]{Path.GetFileNameWithoutExtension(executable),profile.Launcher}.Where(n=>n!=null))foreach(var process in Process.GetProcessesByName(name))using(process)throw new InvalidOperationException("Close "+profile.Name+" before changing its private set.");}
+    public static void ValidateGame(string executable,ProfileInfo observed=null) {
         string full=Path.GetFullPath(executable);Engine.CheckPath(full);
-        var profile=Profile(full);
+        var profile=observed??Profile(full);
         Require(IsolationControl.FileHash(full)==profile.Hash,"Unsupported "+profile.Name+" executable. Launch the updated game with the stock driver to rediscover its profile.");
         Isolation.RequireNoLocalD3D12(full);
     }
@@ -105,7 +106,7 @@ public static class MatchedSet {
         return true;
     }
     public static void RequireDebugCompatibility(MatchedSetReceipt receipt) {
-        Require(!NeedsDebugRoutingFix(receipt.Executable)||receipt.Schema==4,"Existing private setup needs the debug-helper compatibility update. Use the system driver again, then prepare a fresh original 512 MiB copy with this app.");
+        Require(!NeedsDebugRoutingFix(receipt.Executable)||(receipt.Schema==4||receipt.Schema==5&&receipt.DebugFixed),"Existing private setup needs the debug-helper compatibility update. Use the system driver again, then prepare a fresh original 512 MiB copy with this app.");
     }
     public static void ValidateDebugSources() {
         foreach(var file in DebugHelpers){string source=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),file.Key);Engine.CheckPath(source);Require(IsolationControl.FileHash(source)==file.Value,"Windows debug helper version is unsupported: "+file.Key+". No compatibility files copied.");}
@@ -114,13 +115,26 @@ public static class MatchedSet {
         Require(mib==512||mib==1024||mib==2048||mib==4096||mib==8192||mib==16384,"Supported experimental private limits: 512 MiB, 1/2/4/8/16 GiB.");
         return name.Equals(Xe2,StringComparison.OrdinalIgnoreCase)?mib==8192?LargeCachePatch.EightGiB:mib==16384?LargeCachePatch.SixteenGiB:mib==1024?Engine.OneGiB:mib==2048?Engine.TwoGiB:mib==4096?Engine.FourGiB:Engine.Original:Originals[name];
     }
+    public static bool IsTrialReceipt(string path){if(!File.Exists(path))return false;Engine.CheckPath(path);Require(new FileInfo(path).Length<=1048576,"Setup record exceeds bounds.");var data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(path));return data.ContainsKey("Schema")&&Convert.ToInt32(data["Schema"])==5;}
+    static string Expected(string name,int mib,MatchedSetReceipt receipt){
+        if(receipt==null||receipt.Schema!=5)return Expected(name,mib);
+        Require(mib==512||mib==1024,"This game trial offers only the unchanged copy and 1 GiB.");
+        return name.Equals(receipt.Driver,StringComparison.OrdinalIgnoreCase)?mib==512?receipt.OriginalHash:receipt.TrialPatchedHash:receipt.OriginalFiles[name];
+    }
+    static Dictionary<string,string> Package(MatchedSetReceipt r){return r.Schema==5?r.OriginalFiles:Originals;}
+    public static string OriginalDriverHash(MatchedSetReceipt r){return r.Schema==5?r.OriginalHash:Engine.Original;}
+    public static string DriverName(MatchedSetReceipt r){return r.Schema==5?r.Driver:Xe2;}
+    public static void RequireTrialCurrent(MatchedSetReceipt r){Require(r.Schema==5&&r.Trial,"This is not a game-trial record.");var proof=DriverTrial.VerifySuccessful(r.TrialReceipt,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"),true);Require((string)proof["OriginalHash"]==r.OriginalHash&&(string)proof["PatchedHash"]==r.TrialPatchedHash&&(string)proof["Driver"]==r.Driver,"The game setup belongs to a different graphics test.");var sources=(Dictionary<string,object>)proof["Sources"];Require(sources.Count==r.OriginalFiles.Count&&r.OriginalFiles.All(e=>sources.ContainsKey(e.Key)&&(string)sources[e.Key]==e.Value),"Game trial dependencies differ from the successful test.");}
+    static byte[] PatchGame(byte[] current,int mib,MatchedSetReceipt receipt){if(receipt.Schema!=5)return Engine.Patch(current,mib);Require(Engine.Hash(current)==receipt.Files[receipt.Driver],"The game's test file changed.");string backup=Path.Combine(Path.GetDirectoryName(receipt.TrialReceipt),"backup",receipt.Driver);Engine.CheckPath(backup);Require(new FileInfo(backup).Length<=128L*1024*1024,"Trial backup exceeds bounds.");byte[] original=File.ReadAllBytes(backup);Require(Engine.Hash(original)==receipt.OriginalHash,"Trial backup changed.");byte[] result=DriverTrial.Patch(original,mib);Require(Engine.Hash(result)==Expected(receipt.Driver,mib,receipt),"Trial output does not match its successful check.");return result;}
     public static void ValidateReceipt(MatchedSetReceipt r) {
-        Require(r!=null&&(r.Schema==3||r.Schema==4)&&r.Files!=null&&r.Files.Count==Originals.Count+(r.Schema==4?DebugHelpers.Count:0),"Unsupported matched-set receipt.");
+        Require(r!=null&&(r.Schema==3||r.Schema==4||r.Schema==5)&&r.Files!=null,"Unsupported matched-set receipt.");
+        if(r.Schema==5){Require(r.Trial&&r.Game!=null&&r.Game.Schema==2&&r.OriginalFiles!=null&&r.OriginalFiles.Count<=128&&r.OriginalFiles.Count>=2&&(r.Driver=="igd12um64xe2.dll"||r.Driver=="igd12um64xe3.dll"),"Invalid game-trial record.");Require(r.OriginalFiles.ContainsKey(r.Driver)&&r.OriginalFiles[r.Driver]==r.OriginalHash&&r.OriginalFiles.ContainsKey("igd12umd64.dll")&&r.Game.ObservedDriverHash==r.OriginalHash&&r.TrialReceipt==r.Game.TrialReceipt,"Game trial source differs.");foreach(var file in r.OriginalFiles)Require(Path.GetFileName(file.Key)==file.Key&&file.Key.EndsWith(".dll",StringComparison.OrdinalIgnoreCase)&&System.Text.RegularExpressions.Regex.IsMatch(file.Value??"","\\A[0-9A-F]{64}\\z"),"Invalid trial dependency.");Require(System.Text.RegularExpressions.Regex.IsMatch(r.TrialPatchedHash??"","\\A[0-9A-F]{64}\\z"),"Invalid patched hash.");}
+        var package=Package(r);Require(r.Files.Count==package.Count+((r.Schema==4||r.Schema==5&&r.DebugFixed)?DebugHelpers.Count:0),"Setup membership differs.");
         string exe=Path.GetFullPath(r.Executable),folder=Path.GetFullPath(r.Folder);
         if(r.Game!=null)Require(ProfileExecutable(r.Game).Equals(exe,StringComparison.OrdinalIgnoreCase),"Receipt game profile differs from its target.");else Profile(exe);
         Require(folder.Equals(exe+".local",StringComparison.OrdinalIgnoreCase),"Unexpected receipt target.");
-        foreach(var entry in Originals)Require(r.Files.ContainsKey(entry.Key)&&r.Files[entry.Key]==Expected(entry.Key,r.MiB),"Receipt does not match the pinned package.");
-        if(r.Schema==4)foreach(var entry in DebugHelpers)Require(r.Files.ContainsKey(entry.Key)&&r.Files[entry.Key]==entry.Value,"Receipt does not match pinned Windows debug helpers.");
+        foreach(var entry in Package(r))Require(r.Files.ContainsKey(entry.Key)&&r.Files[entry.Key]==Expected(entry.Key,r.MiB,r),"Receipt does not match the pinned package.");
+        if(r.Schema==4||r.Schema==5&&r.DebugFixed)foreach(var entry in DebugHelpers)Require(r.Files.ContainsKey(entry.Key)&&r.Files[entry.Key]==entry.Value,"Receipt does not match pinned Windows debug helpers.");
     }
     static void Save(string path,MatchedSetReceipt r) {
         path=Path.GetFullPath(path);Engine.CheckPath(Path.GetDirectoryName(path));
@@ -136,7 +150,7 @@ public static class MatchedSet {
         Require(Directory.EnumerateFileSystemEntries(r.Folder).Count()==r.Files.Count,"Private set contains unexpected files; nothing will be removed.");
         foreach(var entry in r.Files){string file=Path.Combine(r.Folder,entry.Key);Engine.CheckPath(file);Require(File.Exists(file)&&IsolationControl.FileHash(file)==entry.Value,"Private set changed: "+entry.Key);}
     }
-    public static string Prepare(string executable,string driverFolder,string receiptPath,int mib) {
+    public static string Prepare(string executable,string driverFolder,string receiptPath,int mib,string trialReceipt=null) {
         ValidateGame(executable);Closed(executable);driverFolder=Path.GetFullPath(driverFolder);Engine.CheckPath(driverFolder);
         string root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),@"System32\DriverStore\FileRepository")+Path.DirectorySeparatorChar;
         Require(driverFolder.StartsWith(root,StringComparison.OrdinalIgnoreCase),"Choose the installed driver package inside DriverStore.");
@@ -145,19 +159,23 @@ public static class MatchedSet {
         string full=Path.GetFullPath(executable),folder=full+".local";receiptPath=Path.GetFullPath(receiptPath);
         Require(!receiptPath.StartsWith(Path.GetDirectoryName(full)+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase),"Save the receipt outside the game directory.");
         Engine.CheckPath(Path.GetDirectoryName(receiptPath));Require(!File.Exists(receiptPath)&&!Directory.Exists(folder)&&!File.Exists(folder),"Receipt or redirection path already exists.");
-        foreach(var entry in Originals) {
+        Dictionary<string,string> package=Originals;Dictionary<string,object> proof=null;
+        if(trialReceipt==null)Require(Profile(full).Schema!=2,"Use the explicit game-trial setup action for this profile.");
+        if(trialReceipt!=null){Require(mib==512,"Start game trials with an unchanged copy.");proof=DriverTrial.VerifySuccessful(trialReceipt,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"),true);Require(((string)proof["SourceFolder"]).Equals(driverFolder,StringComparison.OrdinalIgnoreCase),"The selected driver differs from this test.");package=((Dictionary<string,object>)proof["Sources"]).ToDictionary(e=>e.Key,e=>(string)e.Value,StringComparer.OrdinalIgnoreCase);Require(Profile(full).Schema==2&&Profile(full).TrialReceipt==trialReceipt,"Start this game with its normal driver first so Arc Cache can find it.");}
+        foreach(var entry in package) {
             Require(!File.Exists(Path.Combine(Path.GetDirectoryName(full),entry.Key)),"Game root already contains Intel package DLL: "+entry.Key);
             string source=Path.Combine(driverFolder,entry.Key);Engine.CheckPath(source);Require(IsolationControl.FileHash(source)==entry.Value,"Unsupported or changed package file: "+entry.Key);
         }
+        long total=0;foreach(var entry in package)total=checked(total+new FileInfo(Path.Combine(driverFolder,entry.Key)).Length);Require(new DriveInfo(Path.GetPathRoot(folder)).AvailableFreeSpace>=total+64L*1024*1024,"Not enough disk space for this game copy.");
         bool fixDebug=NeedsDebugRoutingFix(full);if(fixDebug)ValidateDebugSources();
         var gameProfile=Profile(full);
-        var r=new MatchedSetReceipt{Schema=fixDebug?4:3,Executable=full,Folder=folder,MiB=mib,Status="prepare-started",Files=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase),Game=gameProfile.Schema==1?gameProfile:null};
-        foreach(var entry in Originals)r.Files.Add(entry.Key,Expected(entry.Key,mib));if(fixDebug)foreach(var entry in DebugHelpers)r.Files.Add(entry.Key,entry.Value);Save(receiptPath,r);
+        var r=new MatchedSetReceipt{Schema=trialReceipt!=null?5:fixDebug?4:3,Trial=trialReceipt!=null,DebugFixed=fixDebug,TrialReceipt=trialReceipt,Driver=proof==null?Xe2:(string)proof["Driver"],OriginalHash=proof==null?Engine.Original:(string)proof["OriginalHash"],TrialPatchedHash=proof==null?Engine.OneGiB:(string)proof["PatchedHash"],OriginalFiles=proof==null?null:package,Executable=full,Folder=folder,MiB=mib,Status="prepare-started",Files=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase),Game=gameProfile.Schema==1||gameProfile.Schema==2?gameProfile:null};
+        foreach(var entry in package)r.Files.Add(entry.Key,Expected(entry.Key,mib,r));if(fixDebug)foreach(var entry in DebugHelpers)r.Files.Add(entry.Key,entry.Value);Save(receiptPath,r);
         string staging=folder+".pending-"+Guid.NewGuid().ToString("N");Directory.CreateDirectory(staging);
         try {
-            foreach(var entry in Originals) {
+            foreach(var entry in package) {
                 byte[] bytes=File.ReadAllBytes(Path.Combine(driverFolder,entry.Key));Require(Engine.Hash(bytes)==entry.Value,"Source changed during copy.");
-                if(entry.Key.Equals(Xe2,StringComparison.OrdinalIgnoreCase))bytes=Engine.Patch(bytes,mib);
+                if(entry.Key.Equals(DriverName(r),StringComparison.OrdinalIgnoreCase))bytes=PatchGame(bytes,mib,r);
                 string dest=Path.Combine(staging,entry.Key);
                 using(var stream=new FileStream(dest,FileMode.CreateNew,FileAccess.Write,FileShare.None)){stream.Write(bytes,0,bytes.Length);stream.Flush(true);}
                 Require(IsolationControl.FileHash(dest)==r.Files[entry.Key],"Copy failed validation.");
@@ -169,32 +187,32 @@ public static class MatchedSet {
                 Require(IsolationControl.FileHash(dest)==entry.Value,"Windows debug copy failed validation.");
             }
             Closed(full);ValidateGame(full);Directory.Move(staging,folder);ValidateContents(r);r.Status="prepared-runtime-unverified";Save(receiptPath,r);
-            return "Matched private set prepared: "+mib+" MiB. Runtime loading and cache effect require verification.\r\n"+folder+"\r\nRecovery receipt: "+receiptPath;
+            return "Game copy prepared: "+mib+" MiB. Runtime loading and cache effect require verification.\r\n"+folder+"\r\nRecovery receipt: "+receiptPath;
         } catch {r.Status="recovery-required";Save(receiptPath,r);throw;}
         // Failed staging is retained with pinned hashes for inspection; never recursively remove game paths.
     }
     public static string ChangeCap(string receiptPath,int mib,string backupRoot=null) {
-        var r=Read(receiptPath);Closed(r.Executable);ValidateGame(r.Executable);ValidateContents(r);RequireDebugCompatibility(r);Expected(Xe2,mib);
-        string target=Path.Combine(r.Folder,Xe2),staging=target+".pending";Require(!File.Exists(staging),"Staged DLL already exists; recover before continuing.");
+        var r=Read(receiptPath);Closed(r.Executable,r.Game);ValidateGame(r.Executable,r.Game);ValidateContents(r);RequireDebugCompatibility(r);Expected(DriverName(r),mib,r);if(r.Schema==5)RequireTrialCurrent(r);
+        string target=Path.Combine(r.Folder,DriverName(r)),staging=target+".pending";Require(!File.Exists(staging),"Staged DLL already exists; recover before continuing.");
         var previousAcl=Engine.Security(target);string backup=null;
         if(mib>=8192||r.MiB>=8192){
             string backups=backupRoot??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap","large-cache-backups");Directory.CreateDirectory(backups);Engine.CheckPath(backups);
             backup=Path.Combine(backups,DateTime.UtcNow.ToString("yyyyMMdd-HHmmss")+"-"+Guid.NewGuid().ToString("N"));
-            var journal=Engine.Prepare(target,backup,mib);Require(journal.Before.Hash==r.Files[Xe2],"Private driver differs from backup journal.");File.Copy(receiptPath,Path.Combine(backup,"game-receipt-before.json"));
+            var journal=Engine.Prepare(target,backup,mib);Require(journal.Before.Hash==r.Files[DriverName(r)],"Private driver differs from backup journal.");File.Copy(receiptPath,Path.Combine(backup,"game-receipt-before.json"));
         }
-        byte[] bytes=Engine.Patch(Engine.Read(target),mib);r.Status="change-started";Save(receiptPath,r);
+        byte[] bytes=PatchGame(r.Schema==5?File.ReadAllBytes(target):Engine.Read(target),mib,r);r.Status="change-started";Save(receiptPath,r);
         using(var stream=new FileStream(staging,FileMode.CreateNew,FileAccess.Write,FileShare.None)){stream.Write(bytes,0,bytes.Length);stream.Flush(true);}
         try {
-            Closed(r.Executable);Require(IsolationControl.FileHash(target)==r.Files[Xe2],"Private DLL changed before replacement.");
-            File.Replace(staging,target,null);r.MiB=mib;r.Files[Xe2]=Expected(Xe2,mib);Require(Engine.Equivalent(Engine.Security(target),previousAcl),"Private driver ACL changed during replacement; inspect the backup journal.");r.Status="changed-runtime-unverified";Save(receiptPath,r);ValidateContents(r);
+            Closed(r.Executable,r.Game);Require(IsolationControl.FileHash(target)==r.Files[DriverName(r)],"Private DLL changed before replacement.");
+            File.Replace(staging,target,null);r.MiB=mib;r.Files[DriverName(r)]=Expected(DriverName(r),mib,r);Require(Engine.Equivalent(Engine.Security(target),previousAcl),"Private driver ACL changed during replacement; inspect the backup journal.");r.Status="changed-runtime-unverified";Save(receiptPath,r);ValidateContents(r);
             return "Private Xe2 copy changed to "+mib+" MiB. Installed driver unchanged. Re-launch the game in DX12 and observe the loaded path."+(backup==null?"":"\r\nBackup of previous DLL, next DLL, ACL and receipt: "+backup);
         } catch {r.Status="recovery-required";Save(receiptPath,r);throw;}
     }
     public static string Remove(string receiptPath) {
-        var r=Read(receiptPath);Closed(r.Executable);
+        var r=Read(receiptPath);Closed(r.Executable,r.Game);
         if(!Directory.Exists(r.Folder)){r.Status="removed";Save(receiptPath,r);return "Private set is already absent.";}
         ValidateContents(r);r.Status="remove-started";Save(receiptPath,r);
-        foreach(var entry in r.Files) {Closed(r.Executable);string file=Path.Combine(r.Folder,entry.Key);Engine.CheckPath(file);Require(IsolationControl.FileHash(file)==entry.Value,"File changed during removal.");File.Delete(file);}
+        foreach(var entry in r.Files) {Closed(r.Executable,r.Game);string file=Path.Combine(r.Folder,entry.Key);Engine.CheckPath(file);Require(IsolationControl.FileHash(file)==entry.Value,"File changed during removal.");File.Delete(file);}
         Directory.Delete(r.Folder,false);r.Status="removed";Save(receiptPath,r);return "Owned private driver set removed. Installed driver and Windows settings unchanged.";
     }
 }

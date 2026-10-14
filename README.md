@@ -32,7 +32,7 @@ The driver image reviewed by this project has a **512 MiB default cache-file lim
 
 ## Check a new driver
 
-Open **Graphics → Check support → Try patching** in either version. Arc Cache can test an unchanged copy and a 1 GiB copy in its separate graphics program, with live progress, logs and checked cleanup. Your games and installed driver files stay unchanged. Unknown drivers are not automatically approved for game setups. [Read the test workflow and limits](src/ArcCache.WinUI/docs/GRAPHICS-TRIAL.md).
+Open **Graphics → Check support → Try patching** in either version. Arc Cache can test an unchanged copy and a 1 GiB copy in its separate graphics program, with live progress, logs and checked cleanup. The separate test leaves games and installed driver files unchanged. A pass offers **Choose a game and use this copy**, with an explicit 1 GiB game-trial workflow. Unknown drivers are not automatically promoted to reviewed definitions. [Read the test workflow and limits](src/ArcCache.WinUI/docs/GRAPHICS-TRIAL.md).
 
 The Graphics page also shows whole-PC RAM and the shared Intel disk-cache size. Shader-cache RAM usage cannot currently be measured.
 
@@ -40,12 +40,12 @@ The Graphics page also shows whole-PC RAM and the shared Intel disk-cache size. 
 
 | | Standard preview | Large-cache experimental preview |
 | --- | --- | --- |
-| Download | [Standard release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-standard-graphics-preview-2026.10.14) | [Experimental release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-experimental-graphics-preview-2026.10.14) |
+| Download | [Standard release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-standard-guided-preview-2026.10.14) | [Experimental release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-experimental-guided-preview-2026.10.14) |
 | Presets | Original 512 MiB · 1 · 2 · 4 GiB | Standard presets + 8 · 16 GiB |
 | Source | [`main`](https://github.com/nyannoying1337/ArcCache/tree/main/src) | [`large-cache-experimental`](https://github.com/nyannoying1337/ArcCache/tree/large-cache-experimental/src) |
 | Start here if… | You want the standard workflow | You want larger-limit experiments, DLL scans and Xe3 device tests |
 
-**Driver support:** game setups require the exact reviewed **Xe2 driver 32.0.101.9034 files** and a matching running game. Active built-in and add-in Intel graphics can be selected; the GPU model name no longer decides eligibility. Unknown files stay blocked. Xe3 offers a separate graphics check in the preview build, not a qualified game setup.
+**Driver support:** reviewed game setups require the exact **Xe2 32.0.101.9034 files**. New Xe2/Xe3 files with one trusted cache-setting candidate can continue from passed graphics tests to an explicit **1 GiB game trial**, with per-game loading checks and rollback. Active built-in and add-in Intel graphics can be selected. Unknown/ambiguous files without matching successful tests stay blocked; Xe3/iGPU gameplay remains unverified. [Follow the guided setup](src/ArcCache.WinUI/docs/GUIDED-GAME-SETUP.md).
 
 > **These are unsigned previews.** Loading tests do not prove effective shader-cache capacity. 8/16 GiB gameplay and large-cache reload remain unverified; a large cache can require roughly its size in contiguous RAM. [Test coverage and compatibility](docs/TESTING.md).
 

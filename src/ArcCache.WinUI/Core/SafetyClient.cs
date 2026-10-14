@@ -25,7 +25,7 @@ public sealed class SafetyClient(string workerPath) {
         }catch(Exception e){Trace("worker-error",new{Action=request.Action,ElapsedMs=watch.ElapsedMilliseconds,Error=e.ToString()});throw;}
     }
 }
-public sealed record ReceiptState(int Schema,string Executable,string Folder,int MiB,string Status,Dictionary<string,string> Files);
+public sealed record ReceiptState(int Schema,string Executable,string Folder,int MiB,string Status,Dictionary<string,string> Files,bool Trial=false);
 public sealed record GameSetupState(bool ReceiptExists,bool FolderExists,bool RecordValid,bool ContentsValid,ReceiptState? Receipt,string? Error,bool CompatibilityRepairRequired=false) {
     public bool Configured => !CompatibilityRepairRequired&&RecordValid&&ContentsValid&&FolderExists&&Receipt!=null;
     public bool CanPrepare => !FolderExists&&(!ReceiptExists||(RecordValid&&ContentsValid&&Receipt?.Status=="removed"));

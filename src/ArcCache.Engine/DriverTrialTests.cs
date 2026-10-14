@@ -24,6 +24,22 @@ class DriverTrialTests {
    DriverTrial.Discard(receipt,args[2]);Check(!Directory.Exists(folder),"Only the verified owned test folder is removed");
    Reject(()=>DriverTrial.Discard(Path.Combine(Path.GetTempPath(),"experiment.json"),args[2]),"Cleanup cannot target outside the owned test root");
   }finally{if(Directory.Exists(folder))Directory.Delete(folder,true);}
+  string gameRoot=Path.Combine(Path.GetTempPath(),"ArcGameTrialFixture-"+Guid.NewGuid());Directory.CreateDirectory(gameRoot);
+  try{
+   string exe=Path.Combine(gameRoot,"fixture.exe"),receiptPath=Path.Combine(gameRoot,"game.json"),local=exe+".local",source=Path.Combine(gameRoot,"not-a-test.json");File.WriteAllText(exe,"fixture");Directory.CreateDirectory(local);
+   string driver="igd12um64xe2.dll",originalHash=Engine.Hash(unknown),patchedHash=Engine.Hash(DriverTrial.Patch(unknown,1024)),loaderHash=Engine.Hash(new byte[]{1,2,3});
+   var profile=new MatchedSet.ProfileInfo{Schema=2,AppId=999999,Name="fixture",Root=gameRoot,RelativeExecutable="fixture.exe",Hash=IsolationControl.FileHash(exe),ObservedDriverHash=originalHash,TrialReceipt=source};
+   var record=new MatchedSetReceipt{Schema=5,Trial=true,Executable=exe,Folder=local,MiB=1024,Status="changed-runtime-unverified",Game=profile,TrialReceipt=source,Driver=driver,OriginalHash=originalHash,TrialPatchedHash=patchedHash,OriginalFiles=new Dictionary<string,string>{{driver,originalHash},{"igd12umd64.dll",loaderHash}},Files=new Dictionary<string,string>{{driver,patchedHash},{"igd12umd64.dll",loaderHash}}};
+   MatchedSet.ValidateReceipt(record);Check(true,"Explicit game-trial record preserves its original and patched source hashes");
+   record.MiB=4096;Reject(()=>MatchedSet.ValidateReceipt(record),"Unreviewed game trials cannot request larger limits");record.MiB=1024;
+   record.Files[driver]="CHANGED";Reject(()=>MatchedSet.ValidateReceipt(record),"Changed patched hash rejected");record.Files[driver]=patchedHash;
+   record.OriginalFiles["..\\escape.dll"]=loaderHash;Reject(()=>MatchedSet.ValidateReceipt(record),"Trial dependency cannot escape its game folder");record.OriginalFiles.Remove("..\\escape.dll");
+   record.Trial=false;Reject(()=>MatchedSet.ValidateReceipt(record),"Trial record cannot pretend to be regular support");record.Trial=true;
+   Reject(()=>DriverTrial.Saved(source),"Successful proof cannot be read from an arbitrary path");
+   File.WriteAllBytes(Path.Combine(local,driver),DriverTrial.Patch(unknown,1024));File.WriteAllBytes(Path.Combine(local,"igd12umd64.dll"),new byte[]{1,2,3});File.WriteAllText(receiptPath,new JavaScriptSerializer().Serialize(record));
+   File.WriteAllText(Path.Combine(local,"extra.txt"),"keep");Reject(()=>MatchedSet.Remove(receiptPath),"Extra game files stop rollback");File.Delete(Path.Combine(local,"extra.txt"));
+   MatchedSet.Remove(receiptPath);Check(!Directory.Exists(local)&&File.Exists(exe),"Game-trial rollback removes only recorded copies without requiring the old test proof");
+  }finally{Directory.Delete(gameRoot,true);}
   Console.WriteLine("Passed "+count+" driver-trial checks. No runtime driver was loaded.");return 0;
  }
 }

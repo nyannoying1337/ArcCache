@@ -17,3 +17,5 @@ Architecture names alone do not grant support. For example, [Intel documents Xe2
 ## Verification status
 
 Automated policy tests cover selecting built-in versus add-in fixtures, missing-device fallback, model-independent acceptance of exact reviewed bytes, and refusal of changed dependencies/unknown versions. The separate [driver trial](../src/ArcCache.WinUI/docs/GRAPHICS-TRIAL.md) can test a trusted single Xe2/Xe3 candidate without approving it for games. Actual integrated-GPU gameplay and positive Xe3 hardware tests remain unverified. The available physical regression configuration is B580; detection uses active SetupAPI devices rather than stale registry entries.
+
+Passed Xe2/Xe3 graphics checks can now continue to a [guided 1 GiB game trial](../src/ArcCache.WinUI/docs/GUIDED-GAME-SETUP.md), with exact source/dependency checks and an original loading check in the game. This does not imply positive iGPU/Xe3 gameplay coverage.

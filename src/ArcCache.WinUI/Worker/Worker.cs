@@ -67,7 +67,7 @@ class Worker {
                 if(!Path.GetFullPath(receipt.Executable).Equals(full,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("Receipt belongs to another game installation.");
                 recordValid=true;
                 if(receipt.Status=="removed"&&!present)contentsValid=true;
-                else {MatchedSet.ValidateContents(receipt);contentsValid=true;compatibilityRepairRequired=receipt.Schema!=4&&MatchedSet.NeedsDebugRoutingFix(receipt.Executable);}
+                else {MatchedSet.ValidateContents(receipt);contentsValid=true;compatibilityRepairRequired=receipt.Schema!=4&&!(receipt.Schema==5&&receipt.DebugFixed)&&MatchedSet.NeedsDebugRoutingFix(receipt.Executable);}
             }else if(present)error="A private folder exists without this app's recovery record. Import the original matched-set receipt; do not create another setup.";
         }catch(Exception e){error=e.Message;}
         if(!exists&&present) {
@@ -82,12 +82,13 @@ class Worker {
     static object DiscoverGame(Request r) {
         if(r.SteamAppId==0)throw new InvalidDataException("Steam app identity required.");
         string root=Path.GetFullPath(r.InstallDirectory).TrimEnd(Path.DirectorySeparatorChar);Engine.CheckPath(root);
+        string successful=r.SourceReceipt??SuccessfulTrial();Dictionary<string,object> trial=null;if(successful!=null)trial=DriverTrial.VerifySuccessful(successful,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"),false);
         var previous=MatchedSet.ReadProfile(r.SteamAppId);string previousExe=null;
         if(previous==null&&r.ReceiptPath!=null&&File.Exists(r.ReceiptPath)) {
             var recovered=MatchedSet.Read(r.ReceiptPath);
             if(recovered.Game!=null&&recovered.Game.AppId==r.SteamAppId&&Path.GetFullPath(recovered.Game.Root).Equals(root,StringComparison.OrdinalIgnoreCase)){if(!r.ReadOnly)MatchedSet.SaveProfile(recovered.Game);previous=recovered.Game;}
         }
-        if(previous==null&&r.SteamAppId==292030) {
+        if(trial==null&&previous==null&&r.SteamAppId==292030) {
             string legacy=Path.Combine(root,@"bin\x64_dx12\witcher3.exe");
             if(File.Exists(legacy)&&IsolationControl.FileHash(legacy)==MatchedSet.GameHash)return new{Validated=true,Executable=legacy,Message="Existing DX12 profile recognized; executable verified."};
             if(Directory.Exists(legacy+".local"))return new{Validated=false,Executable=legacy,Message="The game updated. Use the system driver again, then launch DX12 for automatic detection."};
@@ -95,11 +96,14 @@ class Worker {
         if(previous!=null) {
             previousExe=MatchedSet.ProfileExecutable(previous);
             if(!Path.GetFullPath(previous.Root).Equals(root,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("Game installation moved; previous profile must be recovered before rediscovery.");
-            if(File.Exists(previousExe)&&IsolationControl.FileHash(previousExe)==previous.Hash)return new{Validated=true,Executable=previousExe,Message="Automatically observed DX12 executable; current hash matches the saved profile. Private-driver compatibility still requires an original control test."};
+            if(File.Exists(previousExe)&&IsolationControl.FileHash(previousExe)==previous.Hash){
+                if(trial==null&&previous.Schema==1||trial!=null&&previous.Schema==2&&previous.ObservedDriverHash==(string)trial["OriginalHash"]){if(trial!=null&&previous.TrialReceipt!=successful){previous.TrialReceipt=successful;if(!r.ReadOnly)MatchedSet.SaveProfile(previous);}return new{Validated=true,Executable=previousExe,Message="Game files found. Follow the next setup step."};}
+                if(Directory.Exists(previousExe+".local"))return new{Validated=true,Executable=previousExe,Message="An older game setup exists. Use default settings before setting up the tested driver."};
+            }
             if(Directory.Exists(previousExe+".local"))return new{Validated=false,Executable=previousExe,Message="Game executable changed. Return its private set to stock, then launch DX12 to rediscover it. Recovery stays available."};
         }
         var candidates=new Dictionary<string,MatchedSet.ProfileInfo>(StringComparer.OrdinalIgnoreCase);int unreadable=0;
-        string activeXe2=Path.Combine(ActivePackage(),"igd12um64xe2.dll");
+        string activeXe2=Path.Combine(ActivePackage(),trial==null?"igd12um64xe2.dll":(string)trial["Driver"]);
         foreach(var process in System.Diagnostics.Process.GetProcesses())using(process) {
             IntPtr handle=OpenProcess(0x1000,false,(uint)process.Id);
             try {
@@ -112,8 +116,8 @@ class Worker {
                 if(modules.Select(Path.GetFileName).Where(n=>DriverCatalog.Names.Contains(n,StringComparer.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).Count()!=1)continue;
                 RequireAmd64Exe(exe);Isolation.RequireNoLocalD3D12(exe);
                 if(Directory.Exists(exe+".local")||File.Exists(exe+".local"))continue;
-                RequireOriginalActivePackage();
-                candidates[exe]=new MatchedSet.ProfileInfo{Schema=1,AppId=r.SteamAppId,Root=root,Name=process.ProcessName,RelativeExecutable=exe.Substring(root.Length+1),Hash=IsolationControl.FileHash(exe),ObservedDriverHash=Engine.Hash(Engine.Read(activeXe2)),ObservedUtc=DateTime.UtcNow.ToString("o")};
+                if(trial==null)RequireOriginalActivePackage();
+                candidates[exe]=new MatchedSet.ProfileInfo{Schema=trial==null?1:2,TrialReceipt=successful,AppId=r.SteamAppId,Root=root,Name=process.ProcessName,RelativeExecutable=exe.Substring(root.Length+1),Hash=IsolationControl.FileHash(exe),ObservedDriverHash=IsolationControl.FileHash(activeXe2),ObservedUtc=DateTime.UtcNow.ToString("o")};
             }catch(Exception e){if(!(e is IOException)&&!(e is UnauthorizedAccessException)&&!(e is InvalidOperationException)&&!(e is System.ComponentModel.Win32Exception))throw;unreadable++;}finally{if(handle!=IntPtr.Zero)CloseHandle(handle);}
         }
         if(candidates.Count==1){var entry=candidates.Single();if(!r.ReadOnly)MatchedSet.SaveProfile(entry.Value);return new{Validated=true,Executable=entry.Key,Message="DX12 game executable and original Intel driver observed automatically. No game files changed. Private-driver loading is still untested."};}
@@ -130,8 +134,8 @@ class Worker {
                 var path=new System.Text.StringBuilder(4096);uint length=4096;
                 if(!QueryFullProcessImageName(handle,0,path,ref length)){inaccessible++;continue;}
                 if(!path.ToString().Equals(full,StringComparison.OrdinalIgnoreCase))continue;matched++;
-                foreach(string module in WindowsPlatform.ModulePaths(process.Id))if(Path.GetFileName(module).Equals("igd12um64xe2.dll",StringComparison.OrdinalIgnoreCase))
-                    lines.Add(name+" (PID "+process.Id+"): "+module+"\r\nDisk SHA-256: "+Engine.Hash(Engine.Read(module)));
+                foreach(string module in WindowsPlatform.ModulePaths(process.Id))if(DriverCatalog.Names.Contains(Path.GetFileName(module),StringComparer.OrdinalIgnoreCase))
+                    lines.Add(name+" (PID "+process.Id+"): "+module+"\r\nDisk SHA-256: "+IsolationControl.FileHash(module));
             }catch{inaccessible++;}finally{if(handle!=IntPtr.Zero)CloseHandle(handle);}
         }
         if(lines.Count==0)return inaccessible>0?"The game process could not be fully inspected. No driver-loading result is available.":matched==0?"The selected game installation is not running. Launch it through Steam and check again.":"This game is running, but no Xe2 driver path was observed. This does not confirm use of the private driver.";
@@ -139,19 +143,21 @@ class Worker {
     }
     static object VerifyControl(Request r) {
         var receipt=MatchedSet.Read(r.ReceiptPath);MatchedSet.RequireDebugCompatibility(receipt);if(receipt.MiB!=512)throw new InvalidDataException("Original 512 MiB control required.");
-        MatchedSet.ValidateGame(receipt.Executable);string expected=Path.Combine(receipt.Folder,"igd12um64xe2.dll");
+        MatchedSet.ValidateGame(receipt.Executable,receipt.Game);string expected=Path.Combine(receipt.Folder,MatchedSet.DriverName(receipt));
         foreach(var process in System.Diagnostics.Process.GetProcessesByName(Path.GetFileNameWithoutExtension(receipt.Executable)))using(process) {
             IntPtr handle=OpenProcess(0x1000,false,(uint)process.Id);
             try {
                 if(handle==IntPtr.Zero)continue;var path=new System.Text.StringBuilder(4096);uint length=4096;
                 if(!QueryFullProcessImageName(handle,0,path,ref length)||!path.ToString().Equals(receipt.Executable,StringComparison.OrdinalIgnoreCase))continue;
-                if(WindowsPlatform.ModulePaths(process.Id).Any(m=>m.Equals(expected,StringComparison.OrdinalIgnoreCase))&&Engine.Hash(Engine.Read(expected))==Engine.Original) {
+                if(WindowsPlatform.ModulePaths(process.Id).Any(m=>m.Equals(expected,StringComparison.OrdinalIgnoreCase))&&IsolationControl.FileHash(expected)==MatchedSet.OriginalDriverHash(receipt)) {
                     if(!r.ReadOnly)MatchedSet.RecordOriginalLoading(r.ReceiptPath);return new{Verified=true,Message="Original private Intel driver path and disk hash observed automatically. Game files unchanged. Gameplay and cache behavior remain unmeasured."};
                 }
             }catch(System.ComponentModel.Win32Exception){}catch(UnauthorizedAccessException){}finally{if(handle!=IntPtr.Zero)CloseHandle(handle);}
         }
         return new{Verified=false,Message="Waiting for this game's original private driver to load in DX12."};
     }
+    static string SuccessfulTrial(){try{return DriverTrial.FindSuccessful(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"));}catch{return null;}}
+    static object ValidateForLaunch(Request r){var receipt=MatchedSet.Read(r.ReceiptPath);MatchedSet.ValidateContents(receipt);MatchedSet.ValidateGame(receipt.Executable,receipt.Game);MatchedSet.RequireDebugCompatibility(receipt);if(receipt.Schema==5)MatchedSet.RequireTrialCurrent(receipt);else {string reason;if(!DriverCatalog.CohortQualified(DriverCatalog.Selected(),out reason))throw new InvalidDataException("Check your updated graphics driver or use default settings for this game.");}return new{Ready=true,Trial=receipt.Schema==5};}
     static string ActivePackage(){var p=DriverCatalog.Selected();if(p==null)throw new InvalidOperationException("No active Intel display package was found.");return p.Folder;}
     static object DriverIdentity(){var p=DriverCatalog.Selected();return new{IdentityTag=DriverCatalog.Identity(p),Adapter=p==null?null:p.Adapter,Version=p==null?null:p.Version,DriverFolder=p==null?null:p.Folder};}
     static object Status(bool signatures=false) {
@@ -164,7 +170,7 @@ class Worker {
             var receipt=Json.Deserialize<OverrideReceipt>(File.ReadAllText(IsolationControl.ReceiptPath));DateTime created;
             if(receipt!=null&&receipt.Status=="enabled-reboot-required"&&DateTime.TryParse(receipt.CreatedUtc,null,System.Globalization.DateTimeStyles.RoundtripKind,out created))reboot=created.ToUniversalTime()>DateTime.UtcNow.AddMilliseconds(-(double)GetTickCount64());
         }
-        return new {DriverFolder=folder,Version=package.Version,Adapter=package.Adapter,AdapterId=package.Id,Adapters=DriverCatalog.Packages(),Hash=xe2.Hash,Original=xe2.State=="QualifiedOriginal",Compatible=qualified,CompatibilityReason=reason,Files=files,IdentityTag=currentIdentity,DeveloperOverride=setting!=null&&Convert.ToInt32(setting)==1,RebootRequired=reboot,Administrator=IsolationControl.Administrator};
+        string successful=SuccessfulTrial();return new {SuccessfulTrial=successful,SuccessfulTrialDriver=successful==null?null:(string)DriverTrial.Saved(successful)["Driver"],DriverFolder=folder,Version=package.Version,Adapter=package.Adapter,AdapterId=package.Id,Adapters=DriverCatalog.Packages(),Hash=xe2.Hash,Original=xe2.State=="QualifiedOriginal",Compatible=qualified,CompatibilityReason=reason,Files=files,IdentityTag=currentIdentity,DeveloperOverride=setting!=null&&Convert.ToInt32(setting)==1,RebootRequired=reboot,Administrator=IsolationControl.Administrator};
     }
     static void Progress(int percent,string text){Console.Error.WriteLine("ARCCACHE_PROGRESS "+Json.Serialize(new{Percent=Math.Max(0,Math.Min(100,percent)),Message=text}));}
     static object TrialWorkflow(Request r){
@@ -199,6 +205,12 @@ class Worker {
                 case "DiscoverGame":data=DiscoverGame(r);message="Automatic game discovery completed; game and driver files unchanged.";break;
                 case "VerifyControl":data=VerifyControl(r);message="Original-control observation completed; game files unchanged.";break;
                 case "SelectGraphics":Consent(r);DriverCatalog.Select(r.AdapterId);data=DriverIdentity();message="Graphics chip selected for checks. Windows and game GPU preferences were not changed.";break;
+                case "InspectGameTrial":data=DriverTrial.VerifySuccessful(r.SourceReceipt,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"),true);message="The successful test still matches the signed active driver files. Ready for an explicit game trial.";break;
+                case "ValidateForLaunch":data=ValidateForLaunch(r);message="Game setup checked before launch.";break;
+                case "PrepareGameTrial":Consent(r);if(!r.RiskConfirmed)throw new InvalidOperationException("Accept the game-trial risk before continuing.");RequirePatchSafety(r.Executable,r.RiskConfirmed);DriverTrial.RequireReady();if(r.SourceReceipt==null)throw new InvalidDataException("Run the graphics test first.");if(r.MiB!=512)throw new InvalidDataException("Start with an unchanged game copy.");
+                    if(File.Exists(r.ReceiptPath)){var old=MatchedSet.Read(r.ReceiptPath);if(old.Status!="removed"||Directory.Exists(old.Folder)||File.Exists(old.Folder)||!old.Executable.Equals(Path.GetFullPath(r.Executable),StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("Use default settings before creating a new setup.");File.Move(r.ReceiptPath,r.ReceiptPath+".removed-"+Guid.NewGuid().ToString("N"));}
+                    message=MatchedSet.Prepare(r.Executable,ActivePackage(),r.ReceiptPath,512,r.SourceReceipt);break;
+                case "ChangeGameTrial":Consent(r);if(!r.RiskConfirmed)throw new InvalidOperationException("Accept the game-trial risk before continuing.");var trialChange=MatchedSet.Read(r.ReceiptPath);if(trialChange.Schema!=5)throw new InvalidDataException("This is not a game-trial setup.");RequirePatchSafety(trialChange.Executable,r.RiskConfirmed);DriverTrial.RequireReady();if(trialChange.MiB==512&&r.MiB!=512&&trialChange.Status!="original-control-loading-verified")throw new InvalidOperationException("Start the game's unchanged copy first. Arc Cache checks it automatically.");message=MatchedSet.ChangeCap(r.ReceiptPath,r.MiB);break;
                 case "GraphicsStats":data=GraphicsStatistics.Read();message="Read-only RAM and shared disk-cache snapshot completed.";break;
                 case "InspectDriverTrial":Progress(10,"Checking the selected driver file");data=DriverTrial.Inspect(r.DriverFile);Progress(100,"Candidate check finished; no files changed");message="Separate-test eligibility checked. This does not approve a game patch.";break;
                 case "DiscardDriverTrial":Consent(r);data=DriverTrial.Discard(r.ReceiptPath,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"));message="Owned test copy removed after checking its files. Games and shader caches unchanged.";break;
@@ -224,7 +236,7 @@ class Worker {
                     if(r.Executable!=null&&!Path.GetFullPath(imported.Executable).Equals(Path.GetFullPath(r.Executable),StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("Receipt belongs to another installation.");
                     Engine.CheckPath(Path.GetDirectoryName(Path.GetFullPath(r.ReceiptPath)));byte[] importedBytes=System.Text.Encoding.UTF8.GetBytes(Json.Serialize(imported));
                     using(var stream=new FileStream(r.ReceiptPath,FileMode.CreateNew,FileAccess.Write,FileShare.None)){stream.Write(importedBytes,0,importedBytes.Length);stream.Flush(true);}if(imported.Game!=null)MatchedSet.SaveProfile(imported.Game);message="Existing setup imported; game files unchanged.";break;
-                case "Change":Consent(r);var change=MatchedSet.Read(r.ReceiptPath);RequirePatchSafety(change.Executable,r.RiskConfirmed);RequireOriginalActivePackage();
+                case "Change":Consent(r);var change=MatchedSet.Read(r.ReceiptPath);if(change.Schema==5)throw new InvalidDataException("Use the explicit game-trial action for this setup.");RequirePatchSafety(change.Executable,r.RiskConfirmed);RequireOriginalActivePackage();
                     if(change.MiB==512&&r.MiB!=512&&change.Status!="original-control-loading-verified")throw new InvalidOperationException("Launch the unchanged original private control in DX12. Its loaded driver will be checked automatically before patching.");
                     message=MatchedSet.ChangeCap(r.ReceiptPath,r.MiB);break;
                 case "Remove":Consent(r);message=MatchedSet.Remove(r.ReceiptPath);break;

@@ -14,13 +14,14 @@ public sealed record SetupPresentation(string Installed, string Title, string Ne
             if(!routingReady)return new($"{Limit(receipt.MiB)} saved · Windows setting is off","Enable game-specific settings","Open Settings, enable game-specific settings and restart Windows. Your selected size is still saved.",false);
             if (!detected) return new(installed, "Game update needs attention", "Use default settings, then start the updated game so Arc Cache can find it again.", false);
             bool control = receipt.MiB == 512 && receipt.Status != "original-control-loading-verified";
-            if (control) return new(installed, "Step 2 of 3 · Check the first setup", "Start the game in DirectX 12 mode and keep Arc Cache open. It will check the new setup. Close the game after the check finishes.", true);
-            if (receipt.MiB == 512) return new(installed, "Step 3 of 3 · Choose your cache size", "The first setup loaded successfully. Close the game, choose a size below, and apply it.", false);
+            if (control) return new(installed, "Start the game once", "Start the game in DirectX 12 mode and keep Arc Cache open. It will check the new setup. Close the game after the check finishes.", true);
+            if (receipt.MiB == 512) return new(installed, "Apply your cache size", "The first setup loaded successfully. Close the game, choose a size below, and apply it.", false);
             if(receipt.MiB>=8192)return new(installed,"Ready to try this setting","Start the game in DirectX 12 mode. Large caches can use lots of memory. Use this app to choose a smaller size or return to default settings.",false);
+            if(receipt.Trial)return new(installed,"Ready to try this game","Use Play through Steam in DirectX 12 mode. The copy passed its separate graphics check; game stability and cache capacity remain unmeasured. Use default settings to undo it.",false);
             return new(installed, "Ready to play", "Play through Steam in DirectX 12 mode. Use Check game setup below if you want to verify which files loaded.", false);
         }
         return detected
-            ? new("Default settings · not set up", "Step 1 of 3 · Set up this game", "Arc Cache starts with an unchanged driver copy (about 608 MiB). Your chosen size is applied after that copy is checked.", false)
-            : new("Default settings · not set up", "Step 1 of 3 · Start this game", "Start the game in DirectX 12 mode and leave it at the menu. Arc Cache will find the files it needs.", false);
+            ? new("Default settings · not set up", "Set up this game", "Arc Cache starts with an unchanged driver copy. Free disk space is checked before copying. Your chosen size is applied after that copy is checked.", false)
+            : new("Default settings · not set up", "Start this game", "Start the game in DirectX 12 mode and leave it at the menu. Arc Cache will find the files it needs.", false);
     }
 }
