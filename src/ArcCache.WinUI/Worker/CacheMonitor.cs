@@ -63,3 +63,10 @@ class CacheMonitor : Form {
         try{File.AppendAllText(log,DateTime.UtcNow.ToString("o")+","+gamePid+","+now.Bytes+","+growth+","+changed+","+now.Unreadable+","+privateBytes+","+workingSet+"\r\n");}catch(IOException){text.Text+="\r\nLogging unavailable";}catch(UnauthorizedAccessException){text.Text+="\r\nLogging unavailable";}
     }
 }
+
+// System RAM is not a measurement of Intel's shader cache in memory.
+class GraphicsStatistics {
+ [StructLayout(LayoutKind.Sequential)]class MemoryStatus {public uint Length=(uint)Marshal.SizeOf(typeof(MemoryStatus)),Load;public ulong Total,Available,PageTotal,PageAvailable,VirtualTotal,VirtualAvailable,Extended;}
+ [DllImport("kernel32.dll",SetLastError=true)]static extern bool GlobalMemoryStatusEx([In,Out]MemoryStatus status);
+ public static object Read(){var memory=new MemoryStatus();if(!GlobalMemoryStatusEx(memory))throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());string root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),"AppData","LocalLow","Intel","ShaderCache");var cache=CacheSnapshot.Read(root);return new{RamTotal=memory.Total,RamAvailable=memory.Available,DiskBytes=cache.Bytes,cache.Files,cache.Unreadable,CheckedUtc=DateTime.UtcNow.ToString("o")};}
+}

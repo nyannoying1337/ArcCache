@@ -166,6 +166,25 @@ class Worker {
         }
         return new {DriverFolder=folder,Version=package.Version,Adapter=package.Adapter,AdapterId=package.Id,Adapters=DriverCatalog.Packages(),Hash=xe2.Hash,Original=xe2.State=="QualifiedOriginal",Compatible=qualified,CompatibilityReason=reason,Files=files,IdentityTag=currentIdentity,DeveloperOverride=setting!=null&&Convert.ToInt32(setting)==1,RebootRequired=reboot,Administrator=IsolationControl.Administrator};
     }
+    static void Progress(int percent,string text){Console.Error.WriteLine("ARCCACHE_PROGRESS "+Json.Serialize(new{Percent=Math.Max(0,Math.Min(100,percent)),Message=text}));}
+    static object TrialWorkflow(Request r){
+        Progress(0,"Checking permission and the selected source file");
+        Consent(r);if(!r.RiskConfirmed)throw new InvalidOperationException("Risk acknowledgment is required for an unreviewed driver test.");
+        DriverTrial.RequireReady();var inspected=DriverTrial.Inspect(r.DriverFile);
+        if(!Convert.ToBoolean(Json.Deserialize<Dictionary<string,object>>(Json.Serialize(inspected))["Eligible"]))throw new InvalidDataException("No unambiguous trusted test candidate is available.");
+        string probe=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe");
+        DriverTrial.Progress=delegate(int value,string text){Progress(value*20/100,"Unchanged copy: "+text);};
+        var control=(Dictionary<string,object>)DriverTrial.Create(r.DriverFile,512,probe);
+        DriverTrial.Progress=delegate(int value,string text){Progress(20+value*25/100,"Unchanged copy: "+text);};
+        control=(Dictionary<string,object>)DriverTrial.Run((string)control["Receipt"],probe);
+        if(!Convert.ToBoolean(control["RuntimeVerified"]))return new{Passed=false,Control=control,Patched=(object)null,Summary="The unchanged copy did not pass. No patched copy was made. Your games and Windows driver files are unchanged."};
+        DriverTrial.Progress=delegate(int value,string text){Progress(45+value*25/100,"1 GiB copy: "+text);};
+        var patched=(Dictionary<string,object>)DriverTrial.Create(r.DriverFile,1024,probe);
+        DriverTrial.Progress=delegate(int value,string text){Progress(70+value*29/100,"1 GiB copy: "+text);};
+        patched=(Dictionary<string,object>)DriverTrial.Run((string)patched["Receipt"],probe);bool passed=Convert.ToBoolean(patched["RuntimeVerified"]);
+        Progress(100,"Result saved. Game support and actual cache capacity are not verified.");
+        return new{Passed=passed,Control=control,Patched=patched,Summary=passed?"Both copies loaded and prepared one simple shader. The 1 GiB file was created and checked. Cache capacity, stability and game support are not verified; no game was changed.":"The unchanged copy passed, but the 1 GiB copy did not. Keep normal game settings. No game or Windows driver file was changed."};
+    }
     [STAThread]static int Main(string[] args) {
         try {
             if(args.Length==2&&args[0]=="--cache-monitor") {
@@ -180,6 +199,10 @@ class Worker {
                 case "DiscoverGame":data=DiscoverGame(r);message="Automatic game discovery completed; game and driver files unchanged.";break;
                 case "VerifyControl":data=VerifyControl(r);message="Original-control observation completed; game files unchanged.";break;
                 case "SelectGraphics":Consent(r);DriverCatalog.Select(r.AdapterId);data=DriverIdentity();message="Graphics chip selected for checks. Windows and game GPU preferences were not changed.";break;
+                case "GraphicsStats":data=GraphicsStatistics.Read();message="Read-only RAM and shared disk-cache snapshot completed.";break;
+                case "InspectDriverTrial":Progress(10,"Checking the selected driver file");data=DriverTrial.Inspect(r.DriverFile);Progress(100,"Candidate check finished; no files changed");message="Separate-test eligibility checked. This does not approve a game patch.";break;
+                case "DiscardDriverTrial":Consent(r);data=DriverTrial.Discard(r.ReceiptPath,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"));message="Owned test copy removed after checking its files. Games and shader caches unchanged.";break;
+                case "TryDriverTrial":data=TrialWorkflow(r);message="Separate driver test finished. Games and installed driver files unchanged.";break;
                 case "Status":data=Status();message="Installed driver compatibility inspected.";break;
                 case "DriverIdentity":data=DriverIdentity();message="Driver metadata checked; no DLL hashing or writes.";break;
                 case "CheckDriverCompatibility":data=Status(true);message="Read-only DLL, signature and full-package compatibility review completed. Signature candidates do not enable patches.";break;

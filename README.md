@@ -30,11 +30,17 @@ The driver image reviewed by this project has a **512 MiB default cache-file lim
 
 **What this could help with:** retaining more reusable shader data, reducing repeated compilation when revisiting content, and investigating cache-related stutter. These are the intended benefits, **not measured performance claims**. Larger limits do not fix every source of stutter, create shaders that have never been compiled, or guarantee higher FPS. Games can override driver defaults; larger caches also use more disk space and can increase memory/loading costs. See [test coverage and limitations](docs/TESTING.md).
 
+## Check a new driver
+
+Open **Graphics → Check support → Try patching** in either version. Arc Cache can test an unchanged copy and a 1 GiB copy in its separate graphics program, with live progress, logs and checked cleanup. Your games and installed driver files stay unchanged. Unknown drivers are not automatically approved for game setups. [Read the test workflow and limits](src/ArcCache.WinUI/docs/GRAPHICS-TRIAL.md).
+
+The Graphics page also shows whole-PC RAM and the shared Intel disk-cache size. Shader-cache RAM usage cannot currently be measured.
+
 ## Pick your version
 
 | | Standard preview | Large-cache experimental preview |
 | --- | --- | --- |
-| Download | [Standard release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-standard-preview-2026.10.14) | [Experimental release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-experimental-preview-2026.10.14) |
+| Download | [Standard release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-standard-graphics-preview-2026.10.14) | [Experimental release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-experimental-graphics-preview-2026.10.14) |
 | Presets | Original 512 MiB · 1 · 2 · 4 GiB | Standard presets + 8 · 16 GiB |
 | Source | [`main`](https://github.com/nyannoying1337/ArcCache/tree/main/src) | [`large-cache-experimental`](https://github.com/nyannoying1337/ArcCache/tree/large-cache-experimental/src) |
 | Start here if… | You want the standard workflow | You want larger-limit experiments, DLL scans and Xe3 device tests |

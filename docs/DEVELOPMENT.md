@@ -50,3 +50,7 @@ User guides are under `src/ArcCache.WinUI/docs`. README artwork is an original S
 ## Xe3 probe (experimental branch)
 
 Build `research/LargeCache/build-xe3-probe.cmd` before publishing to include `ArcCache.Xe3Probe.exe`. MSVC is required for this optional native component. The app itself still builds without it; preparing a device-test bundle then reports the missing component. See [test coverage](TESTING.md).
+
+## Native graphics-check helper
+
+Both app builds compile `src/ArcCache.Probe/DriverProbe.cpp` through its incremental build target. Install Visual Studio C++ Build Tools with the Windows SDK. The helper is bundled in downloads; users do not need a compiler. `src/ArcCache.Probe/build.cmd` can also build it directly.

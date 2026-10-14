@@ -153,6 +153,11 @@ if(args.Length>0) {
             var risk=safety.RunAsync(new(action,Confirmed:true)).GetAwaiter().GetResult();Check(!risk.Ok&&risk.Message.Contains("risk acknowledgment"),"Missing risk acknowledgment permitted a device experiment.");
         }
     });
+    Test("Separate test requires explicit risk consent and read-only mode forbids its writes",()=>{
+        var refused=safety.RunAsync(new("TryDriverTrial",Confirmed:true)).GetAwaiter().GetResult();Check(!refused.Ok&&refused.Message.Contains("Risk acknowledgment"),"Risk consent bypassed.");
+        refused=safety.RunAsync(new("TryDriverTrial",Confirmed:true,RiskConfirmed:true,ReadOnly:true)).GetAwaiter().GetResult();Check(!refused.Ok&&refused.Message.Contains("Read-only"),"Read-only test created files.");
+    });
+    Test("Graphics statistics separate whole-PC RAM from shared disk files",()=>{var snapshot=safety.RunAsync(new("GraphicsStats",ReadOnly:true)).GetAwaiter().GetResult();Check(snapshot.Ok&&snapshot.Data.GetProperty("RamTotal").GetUInt64()>=snapshot.Data.GetProperty("RamAvailable").GetUInt64()&&snapshot.Data.GetProperty("DiskBytes").GetInt64()>=0,"Invalid memory/cache snapshot.");});
     Test("Worker refuses unknown operations without changes",()=>{var reply=safety.RunAsync(new("UnknownOperation")).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Unknown action"),"Unknown operation accepted.");});
     Test("Worker refuses all mutation kinds without explicit confirmation",()=>{foreach(string action in new[]{"Prepare","Change","Remove","Import","EnableOverride","RestoreOverride","SelectGraphics","CreateXe3Experiment","RunXe3Experiment"}){var reply=safety.RunAsync(new(action)).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Explicit confirmation"),"Mutation accepted without confirmation: "+action);}});
     Test("Automatic discovery never guesses an executable for a stopped unknown title",()=>{
@@ -165,7 +170,7 @@ if(args.Length>0) {
             var reply=safety.RunAsync(new("Safety",SteamAppId:292030,InstallDirectory:root)).GetAwaiter().GetResult();Check(reply.Ok&&!reply.Data.GetProperty("Allowed").GetBoolean()&&reply.Data.GetProperty("Marker").GetString()=="EasyAntiCheat","Anti-cheat did not override profile eligibility.");
             string exe=Path.Combine(root,"bin","x64_dx12","witcher3.exe"),receipt=Path.Combine(root,"receipt.json");File.WriteAllText(exe,"temporary fixture");
             reply=safety.RunAsync(new("Prepare",exe,receipt,Confirmed:true)).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Anti-cheat indicator")&&!Directory.Exists(exe+".local")&&!File.Exists(receipt),"Direct worker request bypassed safety or wrote setup files.");
-            reply=safety.RunAsync(new("Prepare",exe,receipt,Confirmed:true,RiskConfirmed:true)).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Unsupported Witcher executable")&&!Directory.Exists(exe+".local")&&!File.Exists(receipt),"Risk consent should pass the warning but never bypass executable validation.");
+            reply=safety.RunAsync(new("Prepare",exe,receipt,Confirmed:true,RiskConfirmed:true)).GetAwaiter().GetResult();Check(!reply.Ok&&(reply.Message.Contains("Unsupported Witcher executable")||reply.Message.Contains("Driver compatibility review required"))&&!Directory.Exists(exe+".local")&&!File.Exists(receipt),"Risk consent should pass the warning but never bypass executable validation.");
             if(args.Length>=2) {
                 var live=JsonSerializer.Deserialize<ReceiptState>(File.ReadAllText(args[1]))!;File.WriteAllText(receipt,JsonSerializer.Serialize(live with{Executable=exe,Folder=exe+".local"}));
                 reply=safety.RunAsync(new("Change",ReceiptPath:receipt,MiB:1024,Confirmed:true)).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Anti-cheat indicator"),"Change bypassed the fresh safety scan.");
@@ -183,7 +188,7 @@ if(args.Length>0) {
             var source=JsonSerializer.Deserialize<ReceiptState>(File.ReadAllText(args[1]))!;var hashes=new Dictionary<string,string>(source.Files);hashes["igd12um64xe2.dll"]="1A552E471AE986A52D045C4112E1980FB7171AABEBFF93C027A4BBA10A3C6229";
             File.WriteAllText(temporary,JsonSerializer.Serialize(source with{MiB=512,Files=hashes,Status="prepared-runtime-unverified"}));
             var result=safety.RunAsync(new("Change",ReceiptPath:temporary,MiB:2048,Confirmed:true,RiskConfirmed:true)).GetAwaiter().GetResult();
-            Check(!result.Ok&&result.Message.Contains("checked automatically"),"User consent bypassed the original-loading gate.");
+            Check(!result.Ok&&(result.Message.Contains("checked automatically")||result.Message.Contains("Driver compatibility review required")),"User consent bypassed the original-loading gate.");
         }finally{File.Delete(temporary);}
     });
     Test("Original-control check never verifies a stopped copied executable or changes its receipt",()=>{
@@ -195,7 +200,7 @@ if(args.Length>0) {
             var result=safety.RunAsync(new("VerifyControl",ReceiptPath:receipt)).GetAwaiter().GetResult();Check((!result.Ok||!result.Data.GetProperty("Verified").GetBoolean())&&File.ReadAllText(receipt)==before,"Stopped/unrelated process falsely verified the original control.");
         }finally{Directory.Delete(root,true);}
     });
-    Test("Worker inspects original system driver READ ONLY",()=>{var reply=safety.RunAsync(new("Status")).GetAwaiter().GetResult();Check(reply.Ok&&reply.Data.GetProperty("Original").GetBoolean(),"Original system driver was not verified.");});
+    Test("Worker inspects the current driver read-only and blocks versions without a reviewed definition",()=>{var reply=safety.RunAsync(new("Status")).GetAwaiter().GetResult();Check(reply.Ok,"Current driver could not be inspected.");if(reply.Data.GetProperty("Version").GetString()=="32.0.101.9034")Check(reply.Data.GetProperty("Original").GetBoolean()&&reply.Data.GetProperty("Compatible").GetBoolean(),"Reviewed driver was not verified.");else Check(!reply.Data.GetProperty("Compatible").GetBoolean(),"An unknown version became game-compatible.");});
     Test("Worker refuses a missing recovery receipt",()=>{var reply=safety.RunAsync(new("Validate",ReceiptPath:Path.Combine(Path.GetTempPath(),Guid.NewGuid()+".json"))).GetAwaiter().GetResult();Check(!reply.Ok,"Missing receipt accepted.");});
     Test("Game state recognizes the validated live cap and blocks duplicate preparation",()=>{
         if(args.Length<2)return;
@@ -228,3 +233,8 @@ if(args.Length>=3) {
     });
     Console.WriteLine($"Passed {passed} total checks including bridge process lifecycle.");
 }
+
+if(args.Length>=4){Test("Worker progress streams before completion and malformed events do not break the result",()=>{
+ var client=new SafetyClient(args[3]);var first=new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);client.Progress=(value,message)=>first.TrySetResult(value);
+ var result=client.RunAsync(new("Fixture"));Check(first.Task.Wait(5000)&&first.Task.Result==100&&!result.IsCompleted,"Progress was buffered until completion or not bounded.");Check(result.GetAwaiter().GetResult().Ok,"Malformed progress broke the worker result.");
+});Console.WriteLine($"Passed {passed} total checks including live progress.");}
