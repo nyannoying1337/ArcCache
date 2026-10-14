@@ -54,7 +54,7 @@ class CacheMonitor : Form {
         IntPtr front=GetForegroundWindow();uint foregroundPid;GetWindowThreadProcessId(front,out foregroundPid);Rect rect;
         if(foregroundPid==gamePid&&GetWindowRect(front,out rect)){Location=new Point(Math.Max(rect.Left,rect.Right-Width-18),rect.Top+42);if(!Visible)Show();}else if(Visible)Hide();
         var now=CacheSnapshot.Read(root);long growth=now.Bytes-initial.Bytes;int changed=now.ChangedSince(initial);
-        text.Text="Intel cache folder · SHARED / unattributed\r\nSize: "+Number(now.Bytes)+"   Growth: "+(growth>=0?"+":"")+Number(growth)+"\r\nChanged files: "+changed+"   Read failures: "+now.Unreadable+"\r\nDisk updates every 2s · not shader compile count";
+        text.Text="Intel cache · includes other apps\r\nSize: "+Number(now.Bytes)+"   Change: "+(growth>=0?"+":"")+Number(growth)+"\r\nChanged files: "+changed+"   Read failures: "+now.Unreadable+"\r\nUpdates every 2 seconds · not a shader count";
         try{File.AppendAllText(log,DateTime.UtcNow.ToString("o")+","+gamePid+","+now.Bytes+","+growth+","+changed+","+now.Unreadable+"\r\n");}catch(IOException){text.Text+="\r\nLogging unavailable";}catch(UnauthorizedAccessException){text.Text+="\r\nLogging unavailable";}
     }
 }

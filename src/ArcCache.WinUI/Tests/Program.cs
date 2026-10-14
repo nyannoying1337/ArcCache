@@ -5,6 +5,27 @@ int passed=0;
 void Check(bool yes,string message){if(!yes)throw new Exception(message);}
 void Test(string name,Action body){body();passed++;Console.WriteLine("PASS "+name);}
 void Reject(Action body){try{body();}catch(InvalidDataException){return;}throw new Exception("Expected rejection.");}
+Test("Independent app instances do not collide or fail operations when a log is locked",()=>{
+    string root=Path.Combine(Path.GetTempPath(),"ArcLogTest-"+Guid.NewGuid());
+    try{
+        var first=new AppStore(root);var second=new AppStore(root);
+        Check(first.LogPath!=second.LogPath,"App instances share a log file.");
+        first.Log("first");second.Log("second");
+        Check(File.ReadAllText(first.LogPath).Contains("first")&&File.ReadAllText(second.LogPath).Contains("second"),"App log entries missing.");
+        using(var locked=new FileStream(first.LogPath,FileMode.Open,FileAccess.ReadWrite,FileShare.None)){first.Log("locked");second.Log("still works");}
+        Check(File.ReadAllText(second.LogPath).Contains("still works"),"Another instance stopped logging.");
+    }finally{Directory.Delete(root,true);}
+});
+Test("Plain game checks distinguish an observed copy from cache performance",()=>{
+    string exe=@"C:\Games\Example\game.exe";
+    Check(PlainLanguage.GameCheck("Game is not running.",exe).StartsWith("Start this game"),"Stopped game falsely reports a setup.");
+    string result=PlainLanguage.GameCheck(exe+@".local\igd12um64xe2.dll",exe);
+    Check(result.Contains("own driver copy")&&result.Contains("not been measured"),"Loading observation claims a capacity/performance result.");
+    Check(PlainLanguage.GameCheck("Disk SHA-256: abc",exe).Contains("outside its custom setup"),"Different driver treated as a custom copy.");
+    Check(PlainLanguage.Error("Manually launch as administrator").Contains("Windows setting"),"Elevation prompt policy lost in plain error.");
+    Check(PlainLanguage.Error("Hash mismatch").Contains("Stop here"),"Changed files encouraged unsafe retry.");
+});
+
 Test("Opt-in diagnostics are local, persist preference, rotate and stop when disabled",()=>{
     string root=Path.Combine(Path.GetTempPath(),"ArcDiagnostics-"+Guid.NewGuid().ToString("N"));
     try {
@@ -23,7 +44,7 @@ Test("Opt-in diagnostics are local, persist preference, rotate and stop when dis
 Test("Inactive routing preserves the saved limit and gives an enable action",()=>{
     var receipt=new ReceiptState(3,"game.exe","game.exe.local",4096,"changed-runtime-unverified",new());
     var ui=SetupPresentation.From(new GameSetupState(true,true,true,true,receipt,null),true,false);
-    Check(ui.Installed.StartsWith("4 GiB saved")&&ui.Title=="Enable private drivers"&&ui.Next.Contains("restart Windows"),"Inactive routing lost saved cap or reported ready.");
+    Check(ui.Installed.StartsWith("4 GiB saved")&&ui.Title=="Enable game-specific settings"&&ui.Next.Contains("restart Windows"),"Inactive routing lost saved cap or reported ready.");
 });
 Test("Routing statuses distinguish off, on and pending restart",()=>{
     Check(RoutingPresentation.Status(false,false).StartsWith("Off"),"Disabled routing shown as ready.");
@@ -36,26 +57,26 @@ Test("Installed wide cap is distinct from unmeasured runtime behavior",()=>{
     var receipt=new ReceiptState(3,"game.exe","game.exe.local",4096,"changed-runtime-unverified",new());
     var state=new GameSetupState(true,true,true,true,receipt,null);
     var ui=SetupPresentation.From(state,true);
-    Check(ui.Installed.StartsWith("4 GiB installed")&&ui.Title=="Ready to play"&&!ui.WaitingForControl,"Applied patch presented as missing or waiting for original control.");
+    Check(ui.Installed.StartsWith("4 GiB set")&&ui.Title=="Ready to play"&&!ui.WaitingForControl,"Applied patch presented as missing or waiting for original control.");
     Check(ui.Next.Contains("Play through Steam")&&!ui.WaitingForControl,"Installed patch still shown as needing setup.");
-    Check(SetupPresentation.From(state,false).Installed.StartsWith("4 GiB installed"),"Stale executable erased verified installed limit.");
-    Check(SetupPresentation.From(state with{ContentsValid=false,Error="Hash mismatch"},true).Title=="Recover existing setup","Invalid disk files shown as applied.");
+    Check(SetupPresentation.From(state,false).Installed.StartsWith("4 GiB set"),"Stale executable erased verified installed limit.");
+    Check(SetupPresentation.From(state with{ContentsValid=false,Error="Hash mismatch"},true).Title=="Fix this setup","Invalid disk files shown as applied.");
 });
 Test("Old private setup needing compatibility migration blocks patching without erasing disk state",()=>{
     var receipt=new ReceiptState(3,"game.exe","game.exe.local",4096,"changed-runtime-unverified",new());
     var state=new GameSetupState(true,true,true,true,receipt,null,true);
     Check(!state.Configured&&!state.CanPrepare&&state.RecordValid,"Unsafe existing setup allowed patching or duplicate preparation.");
-    var ui=SetupPresentation.From(state,true);Check(ui.Installed.StartsWith("4 GiB installed")&&ui.Next.Contains("fresh original 512 MiB"),"Migration erased installation status or failed to give recovery steps.");
+    var ui=SetupPresentation.From(state,true);Check(ui.Installed.StartsWith("4 GiB set")&&ui.Next.Contains("set it up again"),"Migration erased installation status or failed to give recovery steps.");
 });
 Test("Setup workflow advances from detection through control to patch",()=>{
-    Check(SetupPresentation.From(null,false).Title.Contains("Detect"),"Missing detection step.");
+    Check(SetupPresentation.From(null,false).Title.Contains("Start this game"),"Missing detection step.");
     var empty=new GameSetupState(false,false,false,false,null,null);
-    Check(SetupPresentation.From(empty,true).Title.Contains("Prepare"),"Missing prepare step.");
+    Check(SetupPresentation.From(empty,true).Title.Contains("Set up this game"),"Missing prepare step.");
     var receipt=new ReceiptState(3,"game.exe","game.exe.local",512,"prepared-runtime-unverified",new());
     var state=new GameSetupState(true,true,true,true,receipt,null);
     Check(SetupPresentation.From(state,true).WaitingForControl,"Original control check bypassed.");
     Check(SetupPresentation.From(state with{Receipt=receipt with{Status="original-control-loading-verified"}},true).Title.Contains("Step 3"),"Verified control still waiting.");
-    Check(SetupPresentation.From(state with{FolderExists=false,Receipt=receipt with{Status="removed"}},true).Title.Contains("Prepare"),"Removed setup shown as installed.");
+    Check(SetupPresentation.From(state with{FolderExists=false,Receipt=receipt with{Status="removed"}},true).Title.Contains("Set up this game"),"Removed setup shown as installed.");
 });
 Test("Steam artwork resolves flat, direct app-ID and hashed folder assets with icon fallbacks",()=>{
     string root=Path.Combine(Path.GetTempPath(),"ArcArtwork-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
@@ -114,7 +135,7 @@ Test("Steam multiple libraries, install flags, duplicate IDs and traversal",()=>
 if(args.Length>0) {
     var safety=new SafetyClient(Path.GetFullPath(args[0]));
     Test("Worker refuses unknown operations without changes",()=>{var reply=safety.RunAsync(new("UnknownOperation")).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Unknown action"),"Unknown operation accepted.");});
-    Test("Worker refuses all mutation kinds without explicit confirmation",()=>{foreach(string action in new[]{"Prepare","Change","Remove","Import","EnableOverride","RestoreOverride"}){var reply=safety.RunAsync(new(action)).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Explicit confirmation"),"Mutation accepted without confirmation: "+action);}});
+    Test("Worker refuses all mutation kinds without explicit confirmation",()=>{foreach(string action in new[]{"Prepare","Change","Remove","Import","EnableOverride","RestoreOverride","SelectGraphics"}){var reply=safety.RunAsync(new(action)).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Explicit confirmation"),"Mutation accepted without confirmation: "+action);}});
     Test("Automatic discovery never guesses an executable for a stopped unknown title",()=>{
         string root=Path.Combine(Path.GetTempPath(),"ArcDiscovery-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
         try{File.Copy(Environment.ProcessPath!,Path.Combine(root,"possible-game.exe"));var result=safety.RunAsync(new("DiscoverGame",SteamAppId:987654,InstallDirectory:root)).GetAwaiter().GetResult();Check(result.Ok&&!result.Data.GetProperty("Validated").GetBoolean()&&result.Data.GetProperty("Executable").ValueKind==JsonValueKind.Null,"A static executable filename was mistaken for a rendering process.");Check(!Directory.Exists(Path.Combine(root,"possible-game.exe.local")),"Discovery modified the game.");}finally{Directory.Delete(root,true);}

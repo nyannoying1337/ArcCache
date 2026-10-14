@@ -29,3 +29,7 @@ Unknown image hashes can be assessed, but cannot be patched merely because a pat
 ## Reproduce checks
 
 See [build/test commands](DEVELOPMENT.md). Engine/native fixtures use local qualified originals, never redistributed driver files. Core/safety fixtures use temporary directories. Full worker checks may inspect the installed package read-only; fixture checks do not install a real game/system patch.
+
+## Built-in chip selection and plain-language workflow
+
+Both editions enumerate active Intel devices and retain a user-selected device identity. Policy fixtures verify built-in selection, available-device fallback and byte-qualified eligibility independent of model names. Changed files and unknown versions remain blocked. Primary UI states retain saved sizes during driver/routing changes and distinguish loaded-copy observations from unmeasured performance. Integrated-hardware gameplay has not been verified.
