@@ -10,7 +10,7 @@ using Microsoft::WRL::ComPtr;
 std::wstring targetModule;
 bool PrivateDriverLoaded(){HMODULE modules[4096];DWORD needed=0;if(!EnumProcessModules(GetCurrentProcess(),modules,sizeof(modules),&needed))return false;wchar_t own[4096];GetModuleFileNameW(nullptr,own,4096);std::wstring expected=std::wstring(own)+L".local\\"+targetModule;for(DWORD i=0;i<needed/sizeof(HMODULE)&&i<4096;i++){wchar_t path[4096];if(GetModuleFileNameW(modules[i],path,4096)&&_wcsicmp(std::wstring(path).substr(std::wstring(path).find_last_of(L"\\")+1).c_str(),targetModule.c_str())==0){std::wcout<<L"Observed Intel module: "<<path<<L'\n';return _wcsicmp(path,expected.c_str())==0;}}return false;}
 int wmain(int argc,wchar_t** argv){
- if(argc!=3||(_wcsicmp(argv[1],L"igd12um64xe2.dll")!=0&&_wcsicmp(argv[1],L"igd12um64xe3.dll")!=0))return 11;targetModule=argv[1];
+ if(argc!=3||(_wcsicmp(argv[1],L"igd12um64xe2.dll")!=0&&_wcsicmp(argv[1],L"igd12um64xe3.dll")!=0&&_wcsicmp(argv[1],L"igd12um64xeh.dll")!=0))return 11;targetModule=argv[1];
  SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|SEM_NOOPENFILEERRORBOX);
  ComPtr<IDXGIFactory6> factory;if(FAILED(CreateDXGIFactory2(0,IID_PPV_ARGS(&factory))))return 2;
  for(UINT i=0;i<32;i++){
