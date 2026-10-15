@@ -1,6 +1,7 @@
 ﻿using ArcCache.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media.Imaging;
 using System.Diagnostics;
 using System.Text.Json;
@@ -22,6 +23,8 @@ public partial class MainWindow : Window {
     bool TrialMode=>selectedReceipt?.Trial==true||successfulTrial!=null&&(!driverOriginal||successfulTrialDriver is "igd12um64xe3.dll" or "igd12um64xeh.dll");
     bool GameDriverReady=>selectedReceipt!=null&&selectedReceipt.Status!="removed"?(selectedReceipt.Trial?successfulTrial!=null:driverOriginal&&successfulTrialDriver is not ("igd12um64xe3.dll" or "igd12um64xeh.dll")):driverOriginal||successfulTrial!=null;
     GameGuide? gameGuide;
+    int introductionIndex;
+    bool introductionVisible;
     bool busy,driverOriginal,routingReady,receiptValid,recordValid;
     string? steamRoot;
     Process? cacheMonitor;
@@ -44,7 +47,7 @@ public partial class MainWindow : Window {
         diagnostics.Write("session-start",new{Version=typeof(MainWindow).Assembly.GetName().Version?.ToString(),OS=Environment.OSVersion.ToString(),Runtime=Environment.Version.ToString(),Variant=typeof(MainWindow).Assembly.GetName().Name});
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1320,940));Nav.SelectedItem=LibraryNav;
         AppWindow.Closing+=(_,e)=>{if(busy)e.Cancel=true;else{closing=true;graphicsStatsTimer.Stop();discoveryTimer.Stop();StopCacheMonitor();}};
-        Root.Loaded+=async (_,_)=>await Run("Reading your Steam library…",LoadLibrary);
+        Root.Loaded+=async (_,_)=>{await Run("Reading your Steam library…",LoadLibrary);if(!preview&&new Introduction(store.Root).ShouldShow)ShowIntroduction();};
         discoveryTimer.Tick+=async (_,_)=>await PollGame();
         try{scs=new ScsKillerBridge(Path.Combine(store.Root,"scskiller-bridge.json")).Load();string bundled=Path.Combine(AppContext.BaseDirectory,"SCSKiller","cli","scskiller.exe");if(scs.CliPath==null&&File.Exists(bundled))scs.SelectCli(bundled);ScsPath.Text=scs.CliPath??"Choose the SCSKiller command-line program (scskiller.exe).";}catch(Exception e){Log("SCSKiller configuration could not be read: "+e.Message);scs=new ScsKillerBridge(Path.Combine(store.Root,"scskiller-bridge.json"));}
     }
@@ -61,6 +64,7 @@ public partial class MainWindow : Window {
                 if(Environment.GetCommandLineArgs().Contains("--preview-graphics")){Nav.SelectedItem=Nav.MenuItems.OfType<NavigationViewItem>().First(i=>Equals(i.Tag,"Driver"));await Task.Delay(300);Root.UpdateLayout();}
                 if(Environment.GetCommandLineArgs().Contains("--preview-trial")){Nav.SelectedItem=Nav.MenuItems.OfType<NavigationViewItem>().First(i=>Equals(i.Tag,"Driver"));await CheckTrialSupport();await Task.Delay(300);Root.UpdateLayout();File.WriteAllText(path+".trial-checks.json",JsonSerializer.Serialize(new{Eligible=trialEligible,Enabled=TrialButton.IsEnabled,Summary=TrialSummary.Text,Progress=TrialProgress.Value,Ram=GraphicsRam.Text,Cache=GraphicsCache.Text,ReadOnly=preview}));}
                 if(Environment.GetCommandLineArgs().Contains("--preview-settings")){Nav.SelectedItem=Nav.FooterMenuItems.OfType<NavigationViewItem>().First(i=>Equals(i.Tag,"Settings"));Root.UpdateLayout();}
+                if(Environment.GetCommandLineArgs().Contains("--preview-welcome")){ShowIntroduction();if(Environment.GetCommandLineArgs().Contains("--preview-last")){introductionIndex=Introduction.Screens.Length-1;RenderIntroduction();}}
                 int runsBefore=foregroundRuns,pollsBefore=backgroundPolls;
                 if(previewWatchSeconds>0)await Task.Delay(previewWatchSeconds*1000);
                 if(previewWatchSeconds>0)File.WriteAllText(path+".checks.json",JsonSerializer.Serialize(new{ForegroundRunsBefore=runsBefore,ForegroundRunsAfter=foregroundRuns,BackgroundPolls=backgroundPolls-pollsBefore,NavigationEnabled=Nav.IsEnabled}));
@@ -71,6 +75,14 @@ public partial class MainWindow : Window {
             Close();
         };
     }
+    void ShowIntroduction(){introductionIndex=0;introductionVisible=true;Nav.IsEnabled=false;WelcomePanel.Visibility=Visibility.Visible;RenderIntroduction();}
+    void RenderIntroduction(){var screen=Introduction.Screens[introductionIndex];WelcomeTitle.Text=screen.Title;WelcomeBody.Text=screen.Body;WelcomeCount.Text=$"{introductionIndex+1} of {Introduction.Screens.Length}";WelcomeBack.IsEnabled=introductionIndex>0;WelcomeNext.Content=introductionIndex==Introduction.Screens.Length-1?"Check my graphics":"Next";WelcomeNext.Focus(FocusState.Programmatic);}
+    void FinishIntroduction(bool graphics){if(!preview)try{new Introduction(store.Root).Dismiss();}catch(Exception error){Log("Introduction preference could not be saved: "+error.Message);}introductionVisible=false;WelcomePanel.Visibility=Visibility.Collapsed;Nav.IsEnabled=!busy;if(graphics)Nav.SelectedItem=Nav.MenuItems.OfType<NavigationViewItem>().First(i=>Equals(i.Tag,"Driver"));}
+    void ReplayIntroduction(object sender,RoutedEventArgs e){if(!busy)ShowIntroduction();}
+    void IntroductionBack(object sender,RoutedEventArgs e){if(introductionIndex>0){introductionIndex--;RenderIntroduction();}}
+    void IntroductionNext(object sender,RoutedEventArgs e){if(introductionIndex<Introduction.Screens.Length-1){introductionIndex++;RenderIntroduction();}else FinishIntroduction(true);}
+    void IntroductionSkip(object sender,RoutedEventArgs e)=>FinishIntroduction(false);
+    void SelectSize(object sender,RoutedEventArgs e){if(sender is not ToggleButton button||busy)return;CapChoice.SelectedItem=CapChoice.Items.OfType<ComboBoxItem>().First(i=>Equals(i.Tag?.ToString(),button.Tag?.ToString()));UpdateButtons();}
     void DiagnosticToggled(object sender,RoutedEventArgs e) {
         if(initializingDiagnostics||diagnostics==null)return;
         try{diagnostics.SetEnabled(DiagnosticToggle.IsOn);Log(diagnostics.Enabled?"Detailed diagnostics enabled. Files stay local; review them before sharing.":"Detailed diagnostics disabled. Existing logs are retained.");}
@@ -85,7 +97,7 @@ public partial class MainWindow : Window {
         UpdateButtons();
         try{await action();FooterStatus.Text="Finished · see Recent actions for details";}
         catch(Exception e){diagnostics?.Write("action-error",new{Action=label,Error=e.ToString()});Log("Stopped: "+e.Message);FooterStatus.Text="Stopped · no further changes attempted";GlobalNotice.Severity=InfoBarSeverity.Warning;GlobalNotice.Title="Could not finish this step";GlobalNotice.Message=PlainLanguage.Error(e.Message);GlobalNotice.IsOpen=true;}
-        finally{busy=false;Nav.IsEnabled=true;BusyRing.IsActive=false;BusyRing.Visibility=Visibility.Collapsed;UpdateButtons();}
+        finally{busy=false;Nav.IsEnabled=!introductionVisible;BusyRing.IsActive=false;BusyRing.Visibility=Visibility.Collapsed;UpdateButtons();}
     }
     async Task<WorkerReply> Engine(WorkerRequest request) {
         WorkerReply reply=await safety.RunAsync(request);Log(reply.Message);if(!reply.Ok)throw new InvalidOperationException(reply.Message);return reply;
@@ -159,11 +171,15 @@ public partial class MainWindow : Window {
         GameStatus.Text=presentation.Installed;CurrentCap.Text=presentation.Installed;
         GameNotice.Title=presentation.Title;GameNotice.Message=presentation.Next;
         GameNotice.Severity=setupState?.Error!=null||setupState?.CompatibilityRepairRequired==true?InfoBarSeverity.Warning:InfoBarSeverity.Informational;
-        GameNotice.IsOpen=true;
+        GameNotice.IsOpen=setupState?.Error!=null||setupState?.CompatibilityRepairRequired==true;
         gameGuide=GameGuide.From(setupState,selected.Supported,routingReady,GameDriverReady,successfulTrial!=null);GuideTitle.Text=gameGuide.Title;GuideBody.Text=gameGuide.Body;GuideButton.Content=gameGuide.Button;
+        bool ready=setupState?.Configured==true&&selectedReceipt?.MiB>512&&GameDriverReady&&routingReady&&setupState?.Error==null;
+        GuideCard.Visibility=ready?Visibility.Collapsed:Visibility.Visible;
+        SetupStage.Text=gameGuide.Action switch{"Graphics"=>"Before setup · check graphics","Settings"=>"Before setup · enable game-specific settings","Prepare"=>"2 of 4 · prepare the game copy","Apply"=>"4 of 4 · choose a cache size","Launch" when NeedsControlObservation()=>"3 of 4 · waiting for the game to load its copy","Launch"=>"1 of 4 · waiting for you to start the game",_=>"Setup needs attention"};
+        GuideButton.Visibility=gameGuide.Action=="Apply"?Visibility.Collapsed:Visibility.Visible;
         updatingChoice=true;
-        int desired=desiredLimits.GetValueOrDefault(selected.AppId,selectedReceipt?.MiB is >512?selectedReceipt.MiB:1024);if(TrialMode&&desired>1024){desired=1024;desiredLimits[selected.AppId]=1024;}foreach(var item in CapChoice.Items.OfType<ComboBoxItem>())item.IsEnabled=!TrialMode||int.Parse(item.Tag.ToString()!)<=1024;
-        CapChoice.SelectedIndex=desired==4096?3:desired==2048?2:desired==1024?1:0;
+        int desired=desiredLimits.GetValueOrDefault(selected.AppId,selectedReceipt?.MiB is >512?selectedReceipt.MiB:1024);if(TrialMode&&desired>1024){desired=1024;desiredLimits[selected.AppId]=1024;}foreach(var item in CapChoice.Items.OfType<ComboBoxItem>())item.IsEnabled=(!TrialMode||int.Parse(item.Tag.ToString()!)<=1024)&&int.Parse(item.Tag.ToString()!)<=4096;
+        CapChoice.SelectedItem=CapChoice.Items.OfType<ComboBoxItem>().FirstOrDefault(i=>int.Parse(i.Tag.ToString()!)==desired);
         updatingChoice=false;UpdateButtons();
     }
     async Task ShowGame() {
@@ -212,6 +228,7 @@ public partial class MainWindow : Window {
     void UpdateButtons() {
         TrialButton.IsEnabled=!busy&&trialEligible;TrialFile.IsEnabled=!busy;UseTrialButton.IsEnabled=!busy&&successfulTrial!=null;GuideButton.IsEnabled=!busy&&selected!=null;
         if(ApplyButton==null)return;
+        SetupBusy.IsActive=busy;SetupBusy.Visibility=busy?Visibility.Visible:Visibility.Collapsed;
         bool supported=selected?.Supported==true;bool configured=setupState?.Configured==true;
         ApplyButton.IsEnabled=!busy&&supported&&GameDriverReady&&routingReady&&(configured||setupState?.CanPrepare==true)&&!NeedsControlObservation();
         RestoreButton.IsEnabled=!busy&&selected?.SupportedExecutable!=null&&recordValid&&selectedReceipt?.Status!="removed";LaunchButton.IsEnabled=!busy&&selected!=null;ImportButton.IsEnabled=!busy&&selected!=null;CapChoice.IsEnabled=!busy&&supported;
@@ -221,6 +238,13 @@ public partial class MainWindow : Window {
         ApplyButton.Content=NeedsControlObservation()?"Start the game to check setup":configured?"Apply this cache size":"Set up this game";
         bool same=configured&&CapChoice.SelectedItem is ComboBoxItem choice&&int.Parse(choice.Tag.ToString()!)==selectedReceipt?.MiB;
         if(same&&!NeedsControlObservation()){ApplyButton.IsEnabled=false;ApplyButton.Content="This size is already set";}
+        foreach(var button in SizeButtons.Children.OfType<ToggleButton>()){
+            var option=CapChoice.Items.OfType<ComboBoxItem>().First(i=>Equals(i.Tag?.ToString(),button.Tag?.ToString()));
+            button.IsEnabled=CapChoice.IsEnabled&&option.IsEnabled;button.IsChecked=Equals(CapChoice.SelectedItem,option);
+            ToolTipService.SetToolTip(button,option.IsEnabled?"Choose "+button.Content:TrialMode?"This driver currently supports a 1 GiB game trial.":"This size needs the large-cache experimental edition and its supported driver.");
+        }
+        LimitAvailability.Text=TrialMode?"This driver supports Default and 1 GiB here. Larger sizes are unavailable for this driver.":"8 and 16 GiB need the experimental edition and a supported driver.";
+        if(configured&&!same&&!NeedsControlObservation()&&CapChoice.SelectedItem is ComboBoxItem cap)ApplyButton.Content="Apply "+SetupPresentation.Limit(int.Parse(cap.Tag.ToString()!));
         ScsStatusButton.IsEnabled=!busy&&selected!=null&&scs?.CliPath!=null;
         ScsCompileButton.IsEnabled=ScsStatusButton.IsEnabled&&!(configured&&selectedReceipt?.MiB>512);
         ScsSummary.Text=configured&&selectedReceipt?.MiB>512
@@ -255,7 +279,7 @@ public partial class MainWindow : Window {
         await Run("Trying the separate driver copy…",async()=>{try{var reply=await Engine(new("TryDriverTrial",DriverFile:file.File,Confirmed:true,RiskConfirmed:true));bool passed=reply.Data.GetProperty("Passed").GetBoolean();if(passed){TrialLogExpander.IsExpanded=false;successfulTrialDriver=file.Name;successfulTrial=reply.Data.GetProperty("Patched").GetProperty("Receipt").GetString();UseTrialButton.Visibility=Visibility.Visible;UseTrialButton.IsEnabled=true;TrialSummary.Text="Your test copy worked. Choose a game next; Arc Cache will walk you through setting it up.";}else TrialSummary.Text=reply.Data.GetProperty("Summary").GetString();TrialProgress.Value=100;TrialStage.Text=reply.Data.GetProperty("Passed").GetBoolean()?"Finished · ready to set up a game trial":"Finished · test did not pass; keep normal game settings";TrialFilesButton.IsEnabled=true;TrialLog.Text+=JsonSerializer.Serialize(reply.Data,new JsonSerializerOptions{WriteIndented=true})+Environment.NewLine;}catch{TrialFilesButton.IsEnabled=Directory.Exists(Path.Combine(store.Root,"driver-trials"));TrialSummary.Text="Test stopped. No game or installed driver file was changed. See the progress log for the last completed step.";TrialStage.Text="Stopped · no further steps attempted";throw;}finally{TrialProgress.IsIndeterminate=false;}});
     }
     async void DiscardTrialCopy(object sender,RoutedEventArgs e){if(busy)return;var picker=new FileOpenPicker();picker.FileTypeFilter.Add(".json");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));var file=await picker.PickSingleFileAsync();if(file==null)return;if(!await Confirm("Remove this separate test copy?","Select experiment.json inside a driver-trials folder. Arc Cache will check every file before removing that one test folder. Changed or extra files stop removal. Your game setups and shader caches stay as they are.","Remove test copy"))return;await Run("Removing the separate test copy…",async()=>{await Engine(new("DiscardDriverTrial",ReceiptPath:file.Path,Confirmed:true));TrialSummary.Text="That test copy was removed. Games and shader caches are unchanged.";});}
-    async void ChooseGameForTrial(object sender,RoutedEventArgs e){Nav.SelectedItem=LibraryNav;await Run("Choose a game to set up…",async()=>{await LoadDriver();if(selected!=null)await ShowGame();});GlobalNotice.Severity=InfoBarSeverity.Informational;GlobalNotice.Title="Choose a game from your library";GlobalNotice.Message="Follow Your next step on its page. Arc Cache will tell you when to start and close the game.";GlobalNotice.IsOpen=true;}
+    async void ChooseGameForTrial(object sender,RoutedEventArgs e){Nav.SelectedItem=LibraryNav;await Run("Choose a game to set up…",async()=>{await LoadDriver();if(selected!=null)await ShowGame();});GlobalNotice.Severity=InfoBarSeverity.Informational;GlobalNotice.Title="Choose a game from your library";GlobalNotice.Message="Follow the setup guide on the game page. It shows when to start or close the game.";GlobalNotice.IsOpen=true;}
     void FollowGameGuide(object sender,RoutedEventArgs e){if(busy||gameGuide==null)return;switch(gameGuide.Action){case "Graphics":Nav.SelectedItem=Nav.MenuItems.OfType<NavigationViewItem>().First(i=>Equals(i.Tag,"Driver"));break;case "Settings":Nav.SelectedItem=Nav.FooterMenuItems.OfType<NavigationViewItem>().First(i=>Equals(i.Tag,"Settings"));break;case "Restore":RestoreGame(sender,e);break;case "Prepare":case "Apply":ApplyGame(sender,e);break;case "Launch":LaunchGame(sender,e);break;default:RecoveryExpander.IsExpanded=true;break;}}
     void OpenTrialResults(object sender,RoutedEventArgs e){string root=Path.Combine(store.Root,"driver-trials");if(Directory.Exists(root))Process.Start(new ProcessStartInfo("explorer.exe"){UseShellExecute=true,ArgumentList={root}});}
     async Task CheckTrialSupport(){TrialLog.Text="";TrialProgress.Visibility=Visibility.Visible;TrialProgress.IsIndeterminate=true;await Run("Checking graphics support…",async()=>{try{await LoadDriver(true);await InspectTrial();await GraphicsStats();}finally{TrialProgress.IsIndeterminate=false;}});}

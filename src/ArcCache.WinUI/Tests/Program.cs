@@ -5,6 +5,10 @@ int passed=0;
 void Check(bool yes,string message){if(!yes)throw new Exception(message);}
 void Test(string name,Action body){body();passed++;Console.WriteLine("PASS "+name);}
 void Reject(Action body){try{body();}catch(InvalidDataException){return;}throw new Exception("Expected rejection.");}
+Test("Introduction is shown for a new profile, stays dismissed across updates, and recovers invalid preferences",()=>{
+ string root=Path.Combine(Path.GetTempPath(),"ArcWelcomeTest-"+Guid.NewGuid());
+ try{var intro=new Introduction(root);Check(intro.ShouldShow,"New profile skipped introduction.");intro.Dismiss();Check(!new Introduction(root).ShouldShow,"Dismissal did not persist.");File.WriteAllText(Path.Combine(root,"introduction-version.txt"),"invalid");Check(new Introduction(root).ShouldShow,"Invalid preference hid introduction.");Check(Introduction.Screens.Length==5,"Introduction screen count changed unexpectedly.");}finally{if(Directory.Exists(root))Directory.Delete(root,true);}
+});
 Test("Independent app instances do not collide or fail operations when a log is locked",()=>{
     string root=Path.Combine(Path.GetTempPath(),"ArcLogTest-"+Guid.NewGuid());
     try{

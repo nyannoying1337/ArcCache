@@ -32,11 +32,9 @@ The driver image reviewed by this project has a **512 MiB default cache-file lim
 
 ## Xe1 / Arc A-series
 
-Both source branches include a hash-pinned **Xe1 1 GiB test patch** for `igd12um64xeh.dll` in drivers 32.0.101.9034 and 32.0.101.9150. Original/patched hardware checks are required before a game trial. Positive Arc A-series hardware and effective cache capacity remain unverified. [Definition and test boundaries](src/ArcCache.WinUI/docs/XE1-SUPPORT.md) · [First-run introduction proposal](docs/FIRST-RUN-INTRODUCTION-PLAN.md).
+Both source branches include a hash-pinned **Xe1 1 GiB test patch** for `igd12um64xeh.dll` in drivers 32.0.101.9034 and 32.0.101.9150. Original/patched hardware checks are required before a game trial. Positive Arc A-series hardware and effective cache capacity remain unverified. [Definition and test boundaries](src/ArcCache.WinUI/docs/XE1-SUPPORT.md).
 
-Coverage includes A-series work and integrated-device discovery; it is not a B-series-only app. [Implemented coverage and larger-limit work](docs/INTEL-GRAPHICS-COVERAGE.md).
-
-The Xe1 binaries build locally, but their release upload is pending after network timeouts. The download links below still point to the previous guided preview, which does not include this Xe1 addition.
+Coverage includes A-series test patches and integrated-device discovery; it is not a B-series-only app. [Driver support and verification](docs/INTEL-GRAPHICS-COVERAGE.md).
 
 ## Check a new driver
 
@@ -48,7 +46,7 @@ The Graphics page also shows whole-PC RAM and the shared Intel disk-cache size. 
 
 | | Standard preview | Large-cache experimental preview |
 | --- | --- | --- |
-| Download | [Standard release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-standard-guided-preview-2026.10.14) | [Experimental release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-experimental-guided-preview-2026.10.14) |
+| Download | [Standard release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-standard-setup-preview-2026.10.15) | [Experimental release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-experimental-setup-preview-2026.10.15) |
 | Presets | Original 512 MiB · 1 · 2 · 4 GiB | Standard presets + 8 · 16 GiB |
 | Source | [`main`](https://github.com/nyannoying1337/ArcCache/tree/main/src) | [`large-cache-experimental`](https://github.com/nyannoying1337/ArcCache/tree/large-cache-experimental/src) |
 | Start here if… | You want the standard workflow | You want larger-limit experiments, DLL scans and Xe3 device tests |
@@ -58,6 +56,8 @@ The Graphics page also shows whole-PC RAM and the shared Intel disk-cache size. 
 > **These are unsigned previews.** Loading tests do not prove effective shader-cache capacity. 8/16 GiB gameplay and large-cache reload remain unverified; a large cache can require roughly its size in contiguous RAM. [Test coverage and compatibility](docs/TESTING.md).
 
 ## Get started
+
+A first-run introduction explains setup and recovery. Reopen it from Settings. The game page shows one setup guide and visible cache-size buttons; unavailable sizes include a reason.
 
 1. **Download and extract the entire ZIP.** Open `ArcCache.exe` or `ArcCache.Experimental.exe`. No Python, terminal commands or .NET SDK are needed to run it.
 2. **Enable “Enable game-specific settings” once.** Manually run the app as administrator for this setting, confirm, then restart Windows. Use the app normally afterward.
