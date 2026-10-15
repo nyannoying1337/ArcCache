@@ -1,6 +1,6 @@
 # Arc Cache: larger-cap experimental build
 
-Branch `large-cache-experimental`. The standard version is on this repository’s `main` branch. This branch now includes the native WinUI app and safety worker source under the adjacent `intel-cache-cap-winui` / `intel-cache-cap-gui` folders. No unrelated CLI or proxy changes were carried over.
+Branch `large-cache-experimental`. The standard version is on this repository’s `main` branch. The native WinUI app and safety worker source are under `src/ArcCache.WinUI` and `src/ArcCache.Engine`.
 
 [Quick start](../../src/ArcCache.WinUI/docs/QUICKSTART.md) · [Private routing explained](../../src/ArcCache.WinUI/docs/PRIVATE-DRIVERS.md) · [Downloads](https://github.com/nyannoying1337/ArcCache/releases)
 

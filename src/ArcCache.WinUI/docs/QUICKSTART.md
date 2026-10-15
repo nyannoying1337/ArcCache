@@ -6,10 +6,12 @@ Download the matching Windows x64 ZIP from this repository's [Releases](https://
 
 | Version | Limits | Intended use |
 | --- | --- | --- |
-| [Standard preview](https://github.com/nyannoying1337/ArcCache/tree/main/src/ArcCache.WinUI) | Original 512 MiB, 1, 2, 4 GiB | Start here. Only the exact qualified B580 Xe2 driver package is accepted. |
+| [Standard preview](https://github.com/nyannoying1337/ArcCache/tree/main/src/ArcCache.WinUI) | Original 512 MiB, 1, 2, 4 GiB | Start here. Reviewed Xe2 game setups; separate Xe1/Xe2/Xe3 graphics checks and 1 GiB game trials where eligible. |
 | [Large-cache experimental preview](https://github.com/nyannoying1337/ArcCache/tree/large-cache-experimental/research/LargeCache) | Standard presets plus 8 and 16 GiB | Separate build with a larger reload patch, driver-update review, and expanded overlay. 8/16 GiB gameplay and cache capacity remain unverified. |
 
 Both are previews, not universal driver tools. Neither patches unknown driver versions. No Intel driver DLLs or Windows debug helper DLLs are included in downloads. Do not run both versions at once: they share profiles, receipts and settings. Use the experimental app to roll back its 8/16 GiB images; the standard app rejects those images.
+
+The first-run introduction explains the workflow. It can be skipped and reopened from Settings. Size buttons keep unavailable sizes visible with a reason. [Setup controls and statuses](GUIDED-GAME-SETUP.md).
 
 ## First game: five steps
 
@@ -41,4 +43,4 @@ For source build/test instructions see [the app README](../README.md) and [the l
 
 ## Troubleshooting logs
 
-Settings → Troubleshooting offers opt-in detailed local logging and Open logs folder. `--debug` enables session-only diagnostics. See [troubleshooting](TROUBLESHOOTING.md) for privacy, rotation and report instructions. No automatic upload. Normal discovery/monitoring uses the selected game, not a Witcher-only restriction.
+Settings → Troubleshooting offers opt-in detailed local logging and Open logs folder. `--debug` enables session-only diagnostics. See [troubleshooting](TROUBLESHOOTING.md) for privacy, rotation and report instructions. No automatic upload. Discovery and monitoring use the selected game.

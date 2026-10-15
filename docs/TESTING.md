@@ -33,3 +33,7 @@ See [build/test commands](DEVELOPMENT.md). Engine/native fixtures use local qual
 ## Built-in chip selection and plain-language workflow
 
 Both editions enumerate active Intel devices and retain a user-selected device identity. Policy fixtures verify built-in selection, available-device fallback and byte-qualified eligibility independent of model names. Changed files and unknown versions remain blocked. Primary UI states retain saved sizes during driver/routing changes and distinguish loaded-copy observations from unmeasured performance. Integrated-hardware gameplay has not been verified.
+
+## Introduction and setup controls
+
+Introduction preferences are tested for first start, dismissal persistence and invalid preference recovery. Both editions build with the five-screen introduction, a single setup guide and visible size buttons. Read-only UI previews cover the welcome panel and game page. Existing Core/worker checks cover setup stages, missing receipts, closed-game checks, unsupported-driver refusal and consent gates. Hardware and cache-capacity limits above remain unchanged.
