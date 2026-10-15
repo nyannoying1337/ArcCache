@@ -30,9 +30,11 @@ This project changes a driver cache setting; it does not create shaders or promi
 
 ## Download and start
 
-[**Get the Windows x64 release**](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-2026.10.15)
+[**Get the Windows x64 release**](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-2026.10.15-r1)
 
-Download and extract the entire ZIP, then run `ArcCache.exe`. This release is unsigned. Keep the extracted folder together; the app uses companion programs and runtime files beside the main EXE. The source build does not include Intel driver DLLs.
+For the easiest setup, download `ArcCache-Setup-2026.10.15.1-Windows-x64.exe` and follow the installer. It installs for your Windows account and adds an Arc Cache shortcut to the Start menu. Administrator access is not needed to install the app.
+
+The ZIP is also available for portable use: extract the **entire** archive and run `ArcCache.exe`. Both downloads are unsigned. Keep all companion files together; the app uses programs and runtime files beside the main EXE. The source build does not include Intel driver DLLs.
 
 ## Set up a game
 
