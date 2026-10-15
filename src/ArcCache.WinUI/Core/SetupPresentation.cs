@@ -3,7 +3,7 @@
 // Disk installation and runtime observation are independent states.
 public sealed record SetupPresentation(string Installed, string Title, string Next, bool WaitingForControl) {
     public static string Limit(int mib) => mib >= 1024 ? $"{mib / 1024} GiB" : $"{mib} MiB";
-    public static SetupPresentation From(GameSetupState? state, bool detected, bool routingReady=true,bool driverCompatible=true) {
+    public static SetupPresentation From(GameSetupState? state, bool detected,bool routingReady=true,bool driverCompatible=true) {
         if(state?.CompatibilityRepairRequired==true)
             return new($"{Limit(state.Receipt!.MiB)} set · setup needs updating", "Set up this game again", "Close the game. Choose Use default settings, then set it up again. Changing the size alone will not fix the old setup.", false);
         if (state?.Error != null || state?.FolderExists == true && !state.Configured)
@@ -16,6 +16,7 @@ public sealed record SetupPresentation(string Installed, string Title, string Ne
             bool control = receipt.MiB == 512 && receipt.Status != "original-control-loading-verified";
             if (control) return new(installed, "Start the game once", "Start the game in DirectX 12 mode and keep Arc Cache open. It will check the new setup. Close the game after the check finishes.", true);
             if (receipt.MiB == 512) return new(installed, "Apply your cache size", "The first setup loaded successfully. Close the game, choose a size below, and apply it.", false);
+            if(receipt.MiB>=8192)return new(installed,"Ready to try this setting","Start the game in DirectX 12 mode. Large caches can use lots of memory. Use this app to choose a smaller size or return to default settings.",false);
             if(receipt.Trial)return new(installed,"Ready to try this game","Use Play through Steam in DirectX 12 mode. The copy passed its separate graphics check; game stability and cache capacity remain unmeasured. Use default settings to undo it.",false);
             return new(installed, "Ready to play", "Play through Steam in DirectX 12 mode. Use Check game setup below if you want to verify which files loaded.", false);
         }

@@ -41,7 +41,7 @@ public static class Engine {
             if((File.GetAttributes(p)&FileAttributes.ReparsePoint)!=0) throw new InvalidDataException("Links and junctions are blocked.");
         }
     }
-    public static byte[] Read(string path) {CheckPath(path); if(new FileInfo(path).Length!=Size) throw new InvalidDataException("Unsupported DLL size."); return File.ReadAllBytes(path);}
+    public static byte[] Read(string path) {CheckPath(path); if(new FileInfo(path).Length<Size||new FileInfo(path).Length>Size+1048576) throw new InvalidDataException("Unsupported DLL size."); return File.ReadAllBytes(path);}
     static void Require(bool condition,string error) {if(!condition) throw new InvalidDataException(error);}
     static uint U32(byte[] b,int p) {Require(p>=0&&p<=b.Length-4,"Truncated PE."); return BitConverter.ToUInt32(b,p);}
     static ushort U16(byte[] b,int p) {Require(p>=0&&p<=b.Length-2,"Truncated PE."); return BitConverter.ToUInt16(b,p);}
@@ -59,6 +59,7 @@ public static class Engine {
         Require(matches==1,"Ambiguous executable section mapping.");
     }
     public static Inspection Inspect(byte[] bytes) {
+        if(bytes.Length>Size)return LargeCachePatch.Inspect(bytes);
         Require(bytes.Length==Size,"Unsupported DLL size."); PE(bytes);
         bool two=bytes.Skip(Offset-4).Take(24).SequenceEqual(WideTwo),four=bytes.Skip(Offset-4).Take(24).SequenceEqual(WideFour);
         uint value=U32(bytes,Offset);
@@ -73,7 +74,10 @@ public static class Engine {
         return new Inspection{Hash=hash,MiB=two?2048:four?4096:(int)(value/1048576),Version="32.0.101.9034",State=hash==Original?"Original":two||four?"Verified encoding; runtime cap effect untested":"Verified cap-only modification"};
     }
     public static byte[] Patch(byte[] bytes,int mib) {
-        Inspect(bytes); Require((mib>=128&&mib<=2047)||mib==2048||mib==4096,"Choose 128–2047 MiB, or experimental 2048/4096 MiB.");
+        Inspect(bytes);
+        if(bytes.Length>Size)bytes=LargeCachePatch.Original(bytes);
+        if(mib==8192||mib==16384){byte[] original=(byte[])bytes.Clone();Array.Copy(Context,12,original,Offset-4,24);byte[] large=LargeCachePatch.Build(original,mib);LargeCachePatch.Inspect(large);return large;}
+        Require((mib>=128&&mib<=2047)||mib==2048||mib==4096,"Choose 128–2047 MiB, or experimental 2048/4096 MiB.");
         byte[] result=(byte[])bytes.Clone();Array.Copy(Context,12,result,Offset-4,24);
         if(mib==2048||mib==4096)Array.Copy(mib==2048?WideTwo:WideFour,0,result,Offset-4,24);
         else Array.Copy(BitConverter.GetBytes(mib*1048576),0,result,Offset,4);Inspect(result);

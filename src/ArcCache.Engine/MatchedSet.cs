@@ -112,8 +112,8 @@ public static class MatchedSet {
         foreach(var file in DebugHelpers){string source=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),file.Key);Engine.CheckPath(source);Require(IsolationControl.FileHash(source)==file.Value,"Windows debug helper version is unsupported: "+file.Key+". No compatibility files copied.");}
     }
     static string Expected(string name,int mib) {
-        Require(mib==512||mib==1024||mib==2048||mib==4096,"Supported private limits: 512, 1024, 2048 or 4096 MiB.");
-        return name.Equals(Xe2,StringComparison.OrdinalIgnoreCase)?mib==1024?Engine.OneGiB:mib==2048?Engine.TwoGiB:mib==4096?Engine.FourGiB:Engine.Original:Originals[name];
+        Require(mib==512||mib==1024||mib==2048||mib==4096||mib==8192||mib==16384,"Supported experimental private limits: 512 MiB, 1/2/4/8/16 GiB.");
+        return name.Equals(Xe2,StringComparison.OrdinalIgnoreCase)?mib==8192?LargeCachePatch.EightGiB:mib==16384?LargeCachePatch.SixteenGiB:mib==1024?Engine.OneGiB:mib==2048?Engine.TwoGiB:mib==4096?Engine.FourGiB:Engine.Original:Originals[name];
     }
     public static bool IsTrialReceipt(string path){if(!File.Exists(path))return false;Engine.CheckPath(path);Require(new FileInfo(path).Length<=1048576,"Setup record exceeds bounds.");var data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(path));return data.ContainsKey("Schema")&&Convert.ToInt32(data["Schema"])==5;}
     static string Expected(string name,int mib,MatchedSetReceipt receipt){
@@ -191,15 +191,21 @@ public static class MatchedSet {
         } catch {r.Status="recovery-required";Save(receiptPath,r);throw;}
         // Failed staging is retained with pinned hashes for inspection; never recursively remove game paths.
     }
-    public static string ChangeCap(string receiptPath,int mib) {
+    public static string ChangeCap(string receiptPath,int mib,string backupRoot=null) {
         var r=Read(receiptPath);Closed(r.Executable,r.Game);ValidateGame(r.Executable,r.Game);ValidateContents(r);RequireDebugCompatibility(r);Expected(DriverName(r),mib,r);if(r.Schema==5)RequireTrialCurrent(r);
         string target=Path.Combine(r.Folder,DriverName(r)),staging=target+".pending";Require(!File.Exists(staging),"Staged DLL already exists; recover before continuing.");
+        var previousAcl=Engine.Security(target);string backup=null;
+        if(mib>=8192||r.MiB>=8192){
+            string backups=backupRoot??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap","large-cache-backups");Directory.CreateDirectory(backups);Engine.CheckPath(backups);
+            backup=Path.Combine(backups,DateTime.UtcNow.ToString("yyyyMMdd-HHmmss")+"-"+Guid.NewGuid().ToString("N"));
+            var journal=Engine.Prepare(target,backup,mib);Require(journal.Before.Hash==r.Files[DriverName(r)],"Private driver differs from backup journal.");File.Copy(receiptPath,Path.Combine(backup,"game-receipt-before.json"));
+        }
         byte[] bytes=PatchGame(r.Schema==5?File.ReadAllBytes(target):Engine.Read(target),mib,r);r.Status="change-started";Save(receiptPath,r);
         using(var stream=new FileStream(staging,FileMode.CreateNew,FileAccess.Write,FileShare.None)){stream.Write(bytes,0,bytes.Length);stream.Flush(true);}
         try {
             Closed(r.Executable,r.Game);Require(IsolationControl.FileHash(target)==r.Files[DriverName(r)],"Private DLL changed before replacement.");
-            File.Replace(staging,target,null);r.MiB=mib;r.Files[DriverName(r)]=Expected(DriverName(r),mib,r);r.Status="changed-runtime-unverified";Save(receiptPath,r);ValidateContents(r);
-            return "Private Xe2 copy changed to "+mib+" MiB. Installed driver unchanged. Re-launch the game in DX12 and observe the loaded path.";
+            File.Replace(staging,target,null);r.MiB=mib;r.Files[DriverName(r)]=Expected(DriverName(r),mib,r);Require(Engine.Equivalent(Engine.Security(target),previousAcl),"Private driver ACL changed during replacement; inspect the backup journal.");r.Status="changed-runtime-unverified";Save(receiptPath,r);ValidateContents(r);
+            return "Private Xe2 copy changed to "+mib+" MiB. Installed driver unchanged. Re-launch the game in DX12 and observe the loaded path."+(backup==null?"":"\r\nBackup of previous DLL, next DLL, ACL and receipt: "+backup);
         } catch {r.Status="recovery-required";Save(receiptPath,r);throw;}
     }
     public static string Remove(string receiptPath) {

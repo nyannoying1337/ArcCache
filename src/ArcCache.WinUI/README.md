@@ -19,3 +19,7 @@ The header distinguishes saved disk state from runtime observations. Missing rec
 Multiplayer, anti-cheat indicators and incomplete checks require separate risk acknowledgment. Detection is incomplete and no anti-cheat is bypassed. The external overlay reports the shared Intel cache folder, not a proven per-game subset. The optional SCSKiller bridge is stock-driver-only; private-cap compilation and simultaneous recorder compatibility are unresolved.
 
 Settings exposes the one-time machine-wide private-routing setting and opt-in bounded local diagnostics. The app never elevates itself or changes files silently. Normal play does not require the app running; its overlay does.
+
+## Experimental driver inspection
+
+Try a compatibility check can scan a selected DLL or the installed Xe3 DLL. Structural eligibility, reviewed patch bytes, isolated device results and game-profile qualification are shown separately. [Xe3 testing workflow](docs/XE3-EXPERIMENTS.md).

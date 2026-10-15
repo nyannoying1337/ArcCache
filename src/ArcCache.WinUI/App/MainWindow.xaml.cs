@@ -18,6 +18,7 @@ public partial class MainWindow : Window {
     SteamGame? selected;
     ReceiptState? selectedReceipt;
     GameSetupState? setupState;
+    string? experimentDll,experimentReceipt;bool experimentReviewed;
     bool fillingGraphics;
     string? successfulTrial,successfulTrialDriver;
     bool TrialMode=>selectedReceipt?.Trial==true||successfulTrial!=null&&(!driverOriginal||successfulTrialDriver is "igd12um64xe3.dll" or "igd12um64xeh.dll");
@@ -31,9 +32,11 @@ public partial class MainWindow : Window {
     bool safetyAllowed;
     ScsKillerBridge? scs;
     CancellationTokenSource? scsCancellation;
+    readonly DispatcherTimer driverWatchTimer=new(){Interval=TimeSpan.FromSeconds(30)};
+    string driverIdentity="";bool checkingDriver,closing;
     readonly DispatcherTimer discoveryTimer=new(){Interval=TimeSpan.FromSeconds(4)};
     string discoveryMessage="";
-    bool preview,closing;
+    bool preview;
     readonly Dictionary<uint,int> desiredLimits=new();
     bool updatingChoice, synchronizingSelection, backgroundCheck;
     string lastBackgroundError="", displayedArtwork="";
@@ -46,13 +49,15 @@ public partial class MainWindow : Window {
         safety.Diagnostic=diagnostics.Write;initializingDiagnostics=true;DiagnosticToggle.IsOn=diagnostics.Enabled;initializingDiagnostics=false;
         diagnostics.Write("session-start",new{Version=typeof(MainWindow).Assembly.GetName().Version?.ToString(),OS=Environment.OSVersion.ToString(),Runtime=Environment.Version.ToString(),Variant=typeof(MainWindow).Assembly.GetName().Name});
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1320,940));Nav.SelectedItem=LibraryNav;
-        AppWindow.Closing+=(_,e)=>{if(busy)e.Cancel=true;else{closing=true;graphicsStatsTimer.Stop();discoveryTimer.Stop();StopCacheMonitor();}};
-        Root.Loaded+=async (_,_)=>{await Run("Reading your Steam library…",LoadLibrary);if(!preview&&new Introduction(store.Root).ShouldShow)ShowIntroduction();};
+        AppWindow.Closing+=(_,e)=>{if(busy)e.Cancel=true;else{closing=true;graphicsStatsTimer.Stop();discoveryTimer.Stop();driverWatchTimer.Stop();StopCacheMonitor();}};
+        Root.Loaded+=async (_,_)=>{await Run("Reading your Steam library…",LoadLibrary);if(!preview){driverWatchTimer.Start();if(new Introduction(store.Root).ShouldShow)ShowIntroduction();}};
+        driverWatchTimer.Tick+=async (_,_)=>await CheckDriverChanged();
+        Activated+=async (_,e)=>{if(e.WindowActivationState!=WindowActivationState.Deactivated)await CheckDriverChanged();};
         discoveryTimer.Tick+=async (_,_)=>await PollGame();
         try{scs=new ScsKillerBridge(Path.Combine(store.Root,"scskiller-bridge.json")).Load();string bundled=Path.Combine(AppContext.BaseDirectory,"SCSKiller","cli","scskiller.exe");if(scs.CliPath==null&&File.Exists(bundled))scs.SelectCli(bundled);ScsPath.Text=scs.CliPath??"Choose the SCSKiller command-line program (scskiller.exe).";}catch(Exception e){Log("SCSKiller configuration could not be read: "+e.Message);scs=new ScsKillerBridge(Path.Combine(store.Root,"scskiller-bridge.json"));}
     }
     // Read-only visual verification; off-screen so a running game never loses focus.
-    public void StartPreview(string path,uint appId=0,int watchSeconds=0) {
+    public void StartPreview(string path,uint appId=0,int watchSeconds=0,bool simulateDriverUpdate=false) {
         previewWatchSeconds=Math.Clamp(watchSeconds,0,20);
         preview=true;
         AppWindow.IsShownInSwitchers=false;AppWindow.Move(new Windows.Graphics.PointInt32(-20000,-20000));AppWindow.Show(false);
@@ -61,7 +66,8 @@ public partial class MainWindow : Window {
                 await Task.Delay(1500);while(busy)await Task.Delay(200);
                 if(appId!=0){selected=games.FirstOrDefault(g=>g.AppId==appId);await Run("Showing selected game for read-only preview…",ShowGame);Filter();}
                 await Task.Delay(700);while(busy)await Task.Delay(200);Root.Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,32,32,32));Root.UpdateLayout();
-                if(Environment.GetCommandLineArgs().Contains("--preview-graphics")){Nav.SelectedItem=Nav.MenuItems.OfType<NavigationViewItem>().First(i=>Equals(i.Tag,"Driver"));await Task.Delay(300);Root.UpdateLayout();}
+                if(simulateDriverUpdate){ShowDriverChange(driverIdentity+"-preview-fixture");File.WriteAllText(path+".driver-checks.json",JsonSerializer.Serialize(new{ApplyEnabled=ApplyButton.IsEnabled,ApplyLabel=ApplyButton.Content?.ToString(),LaunchEnabled=LaunchButton.IsEnabled,RecoveryEnabled=RestoreButton.IsEnabled,NoticeVisible=DriverUpdateNotice.IsOpen}));}
+                if(Environment.GetCommandLineArgs().Contains("--preview-driver")){Nav.SelectedItem=Nav.MenuItems.OfType<NavigationViewItem>().First(i=>Equals(i.Tag,"Driver"));var identity=await Engine(new("DriverIdentity",ReadOnly:true));string? folder=identity.Data.GetProperty("DriverFolder").GetString();if(folder!=null)await ScanExperiment(Path.Combine(folder,"igd12um64xe3.dll"));await Task.Delay(300);Root.UpdateLayout();File.WriteAllText(path+".xe3-checks.json",JsonSerializer.Serialize(new{Reviewed=experimentReviewed,PrepareEnabled=Xe3Prepare.IsEnabled,RunEnabled=Xe3Run.IsEnabled,Busy=busy}));}
                 if(Environment.GetCommandLineArgs().Contains("--preview-trial")){Nav.SelectedItem=Nav.MenuItems.OfType<NavigationViewItem>().First(i=>Equals(i.Tag,"Driver"));await CheckTrialSupport();await Task.Delay(300);Root.UpdateLayout();File.WriteAllText(path+".trial-checks.json",JsonSerializer.Serialize(new{Eligible=trialEligible,Enabled=TrialButton.IsEnabled,Summary=TrialSummary.Text,Progress=TrialProgress.Value,Ram=GraphicsRam.Text,Cache=GraphicsCache.Text,ReadOnly=preview}));}
                 if(Environment.GetCommandLineArgs().Contains("--preview-settings")){Nav.SelectedItem=Nav.FooterMenuItems.OfType<NavigationViewItem>().First(i=>Equals(i.Tag,"Settings"));Root.UpdateLayout();}
                 if(Environment.GetCommandLineArgs().Contains("--preview-welcome")){ShowIntroduction();if(Environment.GetCommandLineArgs().Contains("--preview-last")){introductionIndex=Introduction.Screens.Length-1;RenderIntroduction();}}
@@ -100,6 +106,7 @@ public partial class MainWindow : Window {
         finally{busy=false;Nav.IsEnabled=!introductionVisible;BusyRing.IsActive=false;BusyRing.Visibility=Visibility.Collapsed;UpdateButtons();}
     }
     async Task<WorkerReply> Engine(WorkerRequest request) {
+        if(preview)request=request with{ReadOnly=true};
         WorkerReply reply=await safety.RunAsync(request);Log(reply.Message);if(!reply.Ok)throw new InvalidOperationException(reply.Message);return reply;
     }
     async Task LoadLibrary() {
@@ -125,14 +132,41 @@ public partial class MainWindow : Window {
         driverOriginal=false;successfulTrial=null;routingReady=false;
         try {
             var reply=await Engine(new(detailed?"CheckDriverCompatibility":"Status"));var d=reply.Data;
-            driverOriginal=d.GetProperty("Compatible").GetBoolean();successfulTrial=d.GetProperty("SuccessfulTrial").GetString();successfulTrialDriver=d.GetProperty("SuccessfulTrialDriver").GetString();routingReady=d.GetProperty("DeveloperOverride").GetBoolean()&&!d.GetProperty("RebootRequired").GetBoolean();
+            driverOriginal=d.GetProperty("Compatible").GetBoolean();successfulTrial=d.GetProperty("SuccessfulTrial").GetString();successfulTrialDriver=d.GetProperty("SuccessfulTrialDriver").GetString();driverIdentity=d.GetProperty("IdentityTag").GetString()??"";
+            routingReady=d.GetProperty("DeveloperOverride").GetBoolean()&&!d.GetProperty("RebootRequired").GetBoolean();
             FillGraphics(d);FillTrial(d);DriverTitle.Text=successfulTrial!=null?"Your test copy worked · choose a game next":driverOriginal?"Ready to set up games":"Check your driver to get started";
-            DriverSummary.Text=$"{d.GetProperty("Adapter").GetString()} · driver {d.GetProperty("Version").GetString()}\n"+(driverOriginal?"The files match a supported version. Start with a game's unchanged copy before choosing a size.":"Your normal driver is unchanged. Check support to see whether a separate test copy can be tried below.");
-            DriverDetails.Text=JsonSerializer.Serialize(d,new JsonSerializerOptions{WriteIndented=true});OverrideStatus.Text=RoutingPresentation.Status(d.GetProperty("DeveloperOverride").GetBoolean(),d.GetProperty("RebootRequired").GetBoolean());
-        }catch(Exception e){DriverTitle.Text="Could not check your graphics software";DriverSummary.Text=PlainLanguage.Error(e.Message);Log("Graphics check: "+e.Message);}
-        if(successfulTrial!=null)DriverSummary.Text="The separate graphics check passed. Choose a game below to set it up. Windows keeps its normal driver.";if(selected!=null)RenderSetup();UpdateButtons();
+            DriverSummary.Text=$"{d.GetProperty("Adapter").GetString()} · {d.GetProperty("Version").GetString()}\n"+(driverOriginal?"The files match a supported version. Start with a game’s unchanged copy before choosing a size.":"Your normal driver is unchanged. Check support or try the separate graphics check below.");
+            var details=new List<string>{"Package: "+d.GetProperty("DriverFolder").GetString()};
+            foreach(var f in d.GetProperty("Files").EnumerateArray())details.Add($"{f.GetProperty("Name").GetString()} · {f.GetProperty("State").GetString()}\nSHA-256: {f.GetProperty("Hash").GetString()}\nConstructor matches: {f.GetProperty("CandidateCount").GetInt32()} · game profile eligible: {f.GetProperty("PatchEnabled").GetBoolean()} · Xe3 device test available: {f.GetProperty("ExperimentalTestEnabled").GetBoolean()}\n{f.GetProperty("Signature").GetString()}");
+            DriverDetails.Text=string.Join("\n\n",details);
+            OverrideStatus.Text=RoutingPresentation.Status(d.GetProperty("DeveloperOverride").GetBoolean(),d.GetProperty("RebootRequired").GetBoolean());
+            bool changedSinceLastReview=false;
+            string baseline=Path.Combine(store.Root,"last-qualified-driver.json");
+            if(File.Exists(baseline)){try{if(new FileInfo(baseline).Length>65536)throw new InvalidDataException("Previous review is too large.");using var old=JsonDocument.Parse(File.ReadAllText(baseline));changedSinceLastReview=old.RootElement.GetProperty("IdentityTag").GetString()!=driverIdentity;}catch(Exception ex){Log("Previous driver review unavailable: "+ex.Message);}}
+            if(!preview){try{
+                if(driverOriginal)File.WriteAllText(baseline,JsonSerializer.Serialize(new{IdentityTag=driverIdentity,Version=d.GetProperty("Version").GetString(),CheckedUtc=DateTime.UtcNow}));
+                if(detailed){string reports=Path.Combine(store.Root,"driver-reports");Directory.CreateDirectory(reports);string report=Path.Combine(reports,DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff")+".json");File.WriteAllText(report,JsonSerializer.Serialize(d,new JsonSerializerOptions{WriteIndented=true}));Log("Read-only compatibility report: "+report);}
+            }catch(Exception ex){Log("Driver review could not be saved: "+ex.Message);}}
+            DriverUpdateNotice.IsOpen=!driverOriginal&&successfulTrial==null;DriverUpdateNotice.Title=driverOriginal?"Driver checked":changedSinceLastReview?"Your graphics driver has changed":"Check your graphics driver before continuing";
+            DriverUpdateNotice.Message=driverOriginal?"The installed files match a supported version. Your game setup can be checked against this version.":"Your saved setup may use an older driver. Check support before using it again, or return the game to default settings. Its shader cache will not be deleted.";
+            if(successfulTrial!=null)DriverSummary.Text="The separate graphics check passed. Choose a game below to set it up. Windows keeps its normal driver.";if(selected!=null)RenderSetup();UpdateButtons();
+        }catch(Exception e){DriverTitle.Text="Could not check your graphics software";DriverSummary.Text=e.Message;DriverUpdateNotice.IsOpen=true;DriverUpdateNotice.Title="Graphics check could not finish";DriverUpdateNotice.Message="Finish installing the graphics driver, then choose Check support again. Saved game setups can still be returned to default settings.";Log("Driver inspection stopped: "+e.Message);if(successfulTrial!=null)DriverSummary.Text="The separate graphics check passed. Choose a game below to set it up. Windows keeps its normal driver.";if(selected!=null)RenderSetup();UpdateButtons();}
     }
-    async void InspectDriver(object sender,RoutedEventArgs e){await CheckTrialSupport();}
+    async Task CheckDriverChanged() {
+        if(busy||checkingDriver||closing||preview||driverIdentity.Length==0)return;checkingDriver=true;
+        try {
+            var reply=await safety.RunAsync(new("DriverIdentity",ReadOnly:true));if(!reply.Ok)throw new IOException(reply.Message);
+            string current=reply.Data.GetProperty("IdentityTag").GetString()??"";if(closing||current==driverIdentity)return;
+            ShowDriverChange(current);
+        }catch(Exception e){if(!closing)Log("Driver update check unavailable: "+e.Message);}finally{checkingDriver=false;}
+    }
+    void ShowDriverChange(string current) {
+        driverIdentity=current;driverOriginal=false;successfulTrial=null;successfulTrialDriver=null;trialEligible=false;UseTrialButton.Visibility=Visibility.Collapsed;
+        DriverUpdateNotice.IsOpen=true;DriverUpdateNotice.Title="Your graphics driver has changed";
+        DriverUpdateNotice.Message="Your saved setup files are unchanged. Check support for the new driver before using them, or return the game to default settings.";
+        DriverTitle.Text="Check support for the updated driver";DriverSummary.Text="The installed graphics software has changed. Your game setup files have not been changed.";
+        Log("Driver change detected from registry/file metadata. Waiting for explicit compatibility review.");if(successfulTrial!=null)DriverSummary.Text="The separate graphics check passed. Choose a game below to set it up. Windows keeps its normal driver.";if(selected!=null)RenderSetup();UpdateButtons();
+    }
     async Task PollGame() {
         if(busy||backgroundCheck||selected==null)return;
         var game=selected;uint id=game.AppId;backgroundCheck=true;backgroundPolls++;
@@ -178,7 +212,7 @@ public partial class MainWindow : Window {
         SetupStage.Text=gameGuide.Action switch{"Graphics"=>"Before setup · check graphics","Settings"=>"Before setup · enable game-specific settings","Prepare"=>"2 of 4 · prepare the game copy","Apply"=>"4 of 4 · choose a cache size","Launch" when NeedsControlObservation()=>"3 of 4 · waiting for the game to load its copy","Launch"=>"1 of 4 · waiting for you to start the game",_=>"Setup needs attention"};
         GuideButton.Visibility=gameGuide.Action=="Apply"?Visibility.Collapsed:Visibility.Visible;
         updatingChoice=true;
-        int desired=desiredLimits.GetValueOrDefault(selected.AppId,selectedReceipt?.MiB is >512?selectedReceipt.MiB:1024);if(TrialMode&&desired>1024){desired=1024;desiredLimits[selected.AppId]=1024;}foreach(var item in CapChoice.Items.OfType<ComboBoxItem>())item.IsEnabled=(!TrialMode||int.Parse(item.Tag.ToString()!)<=1024)&&int.Parse(item.Tag.ToString()!)<=4096;
+        int desired=desiredLimits.GetValueOrDefault(selected.AppId,selectedReceipt?.MiB is >512?selectedReceipt.MiB:1024);if(TrialMode&&desired>1024){desired=1024;desiredLimits[selected.AppId]=1024;}foreach(var item in CapChoice.Items.OfType<ComboBoxItem>())item.IsEnabled=(!TrialMode||int.Parse(item.Tag.ToString()!)<=1024);
         CapChoice.SelectedItem=CapChoice.Items.OfType<ComboBoxItem>().FirstOrDefault(i=>int.Parse(i.Tag.ToString()!)==desired);
         updatingChoice=false;UpdateButtons();
     }
@@ -229,6 +263,7 @@ public partial class MainWindow : Window {
         TrialButton.IsEnabled=!busy&&trialEligible;TrialFile.IsEnabled=!busy;UseTrialButton.IsEnabled=!busy&&successfulTrial!=null;GuideButton.IsEnabled=!busy&&selected!=null;
         if(ApplyButton==null)return;
         SetupBusy.IsActive=busy;SetupBusy.Visibility=busy?Visibility.Visible:Visibility.Collapsed;
+        Xe3Prepare.IsEnabled=!busy&&experimentReviewed;Xe3Run.IsEnabled=!busy&&experimentReceipt!=null;Xe3Folder.IsEnabled=!busy&&experimentReceipt!=null;
         bool supported=selected?.Supported==true;bool configured=setupState?.Configured==true;
         ApplyButton.IsEnabled=!busy&&supported&&GameDriverReady&&routingReady&&(configured||setupState?.CanPrepare==true)&&!NeedsControlObservation();
         RestoreButton.IsEnabled=!busy&&selected?.SupportedExecutable!=null&&recordValid&&selectedReceipt?.Status!="removed";LaunchButton.IsEnabled=!busy&&selected!=null;ImportButton.IsEnabled=!busy&&selected!=null;CapChoice.IsEnabled=!busy&&supported;
@@ -236,14 +271,17 @@ public partial class MainWindow : Window {
         if(setupState?.FolderExists==true&&!routingReady)LaunchButton.IsEnabled=false;
         if(setupState?.FolderExists==true&&(!configured||!GameDriverReady))LaunchButton.IsEnabled=false;
         ApplyButton.Content=NeedsControlObservation()?"Start the game to check setup":configured?"Apply this cache size":"Set up this game";
+
         bool same=configured&&CapChoice.SelectedItem is ComboBoxItem choice&&int.Parse(choice.Tag.ToString()!)==selectedReceipt?.MiB;
         if(same&&!NeedsControlObservation()){ApplyButton.IsEnabled=false;ApplyButton.Content="This size is already set";}
+        if(!driverOriginal&&supported)ApplyButton.Content="Check graphics support first";
+        if(selected!=null)SafetyPanel.Visibility=driverOriginal&&!safetyAllowed?Visibility.Visible:Visibility.Collapsed;
         foreach(var button in SizeButtons.Children.OfType<ToggleButton>()){
             var option=CapChoice.Items.OfType<ComboBoxItem>().First(i=>Equals(i.Tag?.ToString(),button.Tag?.ToString()));
             button.IsEnabled=CapChoice.IsEnabled&&option.IsEnabled;button.IsChecked=Equals(CapChoice.SelectedItem,option);
             ToolTipService.SetToolTip(button,option.IsEnabled?"Choose "+button.Content:TrialMode?"This driver currently supports a 1 GiB game trial.":"This size needs the large-cache experimental edition and its supported driver.");
         }
-        LimitAvailability.Text=TrialMode?"This driver supports Default and 1 GiB here. Larger sizes are unavailable for this driver.":"8 and 16 GiB need the experimental edition and a supported driver.";
+        LimitAvailability.Text=TrialMode?"This driver supports Default and 1 GiB here. Larger sizes are unavailable for this driver.":"8 and 16 GiB are highly experimental and can greatly increase RAM use while loading.";
         if(configured&&!same&&!NeedsControlObservation()&&CapChoice.SelectedItem is ComboBoxItem cap)ApplyButton.Content="Apply "+SetupPresentation.Limit(int.Parse(cap.Tag.ToString()!));
         ScsStatusButton.IsEnabled=!busy&&selected!=null&&scs?.CliPath!=null;
         ScsCompileButton.IsEnabled=ScsStatusButton.IsEnabled&&!(configured&&selectedReceipt?.MiB>512);
@@ -256,7 +294,7 @@ public partial class MainWindow : Window {
         var dialog=new ContentDialog{XamlRoot=Root.XamlRoot,Title=title,Content=panel,PrimaryButtonText=primary,CloseButtonText="Cancel",DefaultButton=ContentDialogButton.Close,RequestedTheme=Root.RequestedTheme};
         CheckBox? original=null,risk=null;
         void Update()=>dialog.IsPrimaryButtonEnabled=(!requireOriginalTest||original?.IsChecked==true)&&(!requireRisk||risk?.IsChecked==true);
-        if(requireOriginalTest){original=new CheckBox{Content="I tested this original private set in gameplay."};panel.Children.Add(original);original.Checked+=(_,_)=>Update();original.Unchecked+=(_,_)=>Update();}
+        if(requireOriginalTest){original=new CheckBox{Content="I checked the unchanged copy first. I understand this option can use lots of memory or cause crashes."};panel.Children.Add(original);original.Checked+=(_,_)=>Update();original.Unchecked+=(_,_)=>Update();}
         if(requireRisk){risk=new CheckBox{Content=new TextBlock{Text="I understand this may stop the game from starting or cause account penalties.",TextWrapping=TextWrapping.Wrap}};panel.Children.Add(risk);risk.Checked+=(_,_)=>Update();risk.Unchecked+=(_,_)=>Update();}
         Update();
         return await dialog.ShowAsync()==ContentDialogResult.Primary;
@@ -288,7 +326,37 @@ public partial class MainWindow : Window {
     async void RefreshLibrary(object sender,RoutedEventArgs e)=>await Run("Refreshing Steam…",LoadLibrary);
     void SearchChanged(AutoSuggestBox sender,AutoSuggestBoxTextChangedEventArgs args){if(!busy)Filter();}
     async void GameSelected(object sender,SelectionChangedEventArgs e){if(busy||synchronizingSelection)return;var next=GamesList.SelectedItem as SteamGame;if(next?.AppId==selected?.AppId)return;selected=next;await Run("Checking this game's setup…",ShowGame);}
-
+    async Task ScanExperiment(string path) {
+        experimentReviewed=false;experimentDll=path;experimentReceipt=null;
+        var reply=await Engine(new("ScanDriverFile",DriverFile:path,ReadOnly:true));var f=reply.Data;
+        experimentReviewed=f.GetProperty("ExperimentalTestEnabled").GetBoolean();
+        ExperimentSummary.Text=f.GetProperty("Assessment").GetString();ExperimentDetails.Text=$"File: {path}\nSHA-256: {f.GetProperty("Hash").GetString()}\nConstructor matches: {f.GetProperty("CandidateCount").GetInt32()}\n{f.GetProperty("Error").GetString()}";
+        UpdateButtons();
+    }
+    async void ScanExperimentalDll(object sender,RoutedEventArgs e) {
+        if(busy)return;var picker=new FileOpenPicker();picker.FileTypeFilter.Add(".dll");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));var file=await picker.PickSingleFileAsync();if(file!=null)await Run("Checking the selected driver file…",()=>ScanExperiment(file.Path));
+    }
+    async void ScanInstalledXe3(object sender,RoutedEventArgs e) {
+        await Run("Checking the installed test file…",async()=>{var identity=await Engine(new("DriverIdentity",ReadOnly:true));string folder=identity.Data.GetProperty("DriverFolder").GetString()??throw new IOException("No active Intel package was found.");await ScanExperiment(Path.Combine(folder,"igd12um64xe3.dll"));});
+    }
+    async void PrepareXe3(object sender,RoutedEventArgs e) {
+        if(busy||!experimentReviewed||experimentDll==null)return;int mib=int.Parse(((ComboBoxItem)Xe3Cap.SelectedItem).Tag.ToString()!);
+        if(!await Confirm("Create a separate graphics test?","Create a separate test copy using "+SetupPresentation.Limit(mib)+"? Games and Windows driver files will not change. The test files may need up to 2 GiB of disk space. Start with the unchanged 512 MiB option. Run Arc Cache normally; administrator rights are not needed. Passing this check does not guarantee that games will work.","Create test copy",requireRisk:true))return;
+        await Run("Creating the separate graphics test…",async()=>{var reply=await Engine(new("CreateXe3Experiment",MiB:mib,Confirmed:true,RiskConfirmed:true,DriverFile:experimentDll));experimentReceipt=reply.Data.GetProperty("Receipt").GetString();ExperimentSummary.Text="The test copy is ready. Run the graphics check next; it has not been tested yet.";ExperimentDetails.Text="Receipt: "+experimentReceipt;});
+    }
+    async void RunXe3(object sender,RoutedEventArgs e) {
+        if(busy||experimentReceipt==null)return;
+        if(!await Confirm("Run the graphics check?","Arc Cache will start its separate test program and try to prepare one simple shader. It will not open a game or replace Windows driver files. A small cache entry may be saved. This test currently needs matching Xe3 graphics and game-specific settings enabled after a restart. It stops after 60 seconds. A pass does not prove that games or larger caches will work.","Run check",requireRisk:true))return;
+        await Run("Running the graphics check…",async()=>{var reply=await Engine(new("RunXe3Experiment",ReceiptPath:experimentReceipt,Confirmed:true,RiskConfirmed:true));bool verified=reply.Data.GetProperty("RuntimeVerified").GetBoolean();ExperimentSummary.Text=verified?"The graphics check passed. Games and larger cache sizes still need testing.":"The graphics check did not pass. Keep default settings and open the details below.";ExperimentDetails.Text=reply.Data.GetProperty("Report").GetString()+"\nReceipt: "+experimentReceipt;});
+    }
+    async void OpenXe3Receipt(object sender,RoutedEventArgs e) {
+        if(busy)return;var picker=new FileOpenPicker();picker.FileTypeFilter.Add(".json");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));var file=await picker.PickSingleFileAsync();if(file==null)return;
+        experimentReceipt=file.Path;ExperimentSummary.Text="Saved test selected. Arc Cache will check its files and your current driver before it can run.";ExperimentDetails.Text="Receipt: "+file.Path;UpdateButtons();
+    }
+    void OpenXe3Folder(object sender,RoutedEventArgs e) {
+        if(experimentReceipt==null)return;try{Process.Start(new ProcessStartInfo("explorer.exe"){UseShellExecute=true,ArgumentList={Path.GetDirectoryName(experimentReceipt)!}});}catch(Exception error){Log("Could not open experiment folder: "+error.Message);}
+    }
+    async void InspectDriver(object sender,RoutedEventArgs e)=>await CheckTrialSupport();
     async void ApplyGame(object sender,RoutedEventArgs e) {
         SteamGame? game=selected;if(busy||game?.Supported!=true)return;
         await Run("Checking safety and confirming this private change…",async()=>{
@@ -299,9 +367,10 @@ public partial class MainWindow : Window {
         WorkerReply assessment;try{assessment=await safety.RunAsync(new("Safety",SteamAppId:game.AppId,InstallDirectory:game.InstallDirectory));}catch(Exception ex){assessment=new(false,ex.Message,default);}
         bool riskRequired=TrialMode||!assessment.Ok||!assessment.Data.GetProperty("Allowed").GetBoolean();
         if(riskRequired)message="This game may have multiplayer or anti-cheat. A modified driver can cause account penalties or stop it from starting.\n\n"+message;
-        if(mib>=2048)message+="\n\nExperimental larger limit: Ready or Not reached the menu with 4 GiB on driver 32.0.101.9034 after the helper fix. Cache capacity and eviction behavior remain unmeasured. Keep the recovery receipt.";
+        if(mib>=8192)message+="\n\nLARGE-CACHE RELOAD EXPERIMENT: This is an untested driver reload patch. The game can fail to launch or crash. Large cache files still require large memory buffers. Loading an 8/16 GiB cache may require roughly 8/16 GiB of RAM plus the game. No gameplay or real shader-cache capacity above 4 GiB is verified. Use this experimental app to return to 4 GiB or stock. Stop the game if memory climbs rapidly.";
+        else if(mib>=2048)message+="\n\nExperimental larger limit: Ready or Not reached the menu with 4 GiB on driver 32.0.101.9034 after the helper fix. Cache capacity and eviction behavior remain unmeasured. Keep the recovery receipt.";
         if(TrialMode)message+="\n\nThis copy passed the separate graphics check, but is new to this game. It could cause launch problems or crashes. Use single-player/offline play; multiplayer or anti-cheat may reject it or penalise your account. Use default settings to undo it. Only the unchanged copy and 1 GiB are offered for this game trial.";
-        if(!await Confirm(riskRequired?"Apply anyway?":configured?"Change this game’s cache size":"Set up this game",message,configured?"Apply":"Set up",requireRisk:riskRequired))return;
+        if(!await Confirm(riskRequired?"Apply anyway?":configured?"Change this game’s cache size":"Set up this game",message,configured?"Apply":"Set up",requireOriginalTest:configured&&mib>=8192,requireRisk:riskRequired))return;
             if(configured)await Engine(new(TrialMode?"ChangeGameTrial":"Change",ReceiptPath:receipt,MiB:mib,Confirmed:true,RiskConfirmed:riskRequired));
             else await Engine(new(TrialMode?"PrepareGameTrial":"Prepare",game.SupportedExecutable,receipt,MiB:512,Confirmed:true,RiskConfirmed:riskRequired,SourceReceipt:TrialMode?successfulTrial:null));
             await ShowGame();
@@ -340,12 +409,13 @@ public partial class MainWindow : Window {
     }
     async void LaunchGame(object sender,RoutedEventArgs e) {
         if(selected==null)return;SteamGame game=selected;uint id=game.AppId;
+        await CheckDriverChanged();
         await Run("Checking this game before opening Steam…",async()=>{
             if(game.SupportedExecutable!=null) {
                 var state=GameSetupState.FromReply(await Engine(new("GameState",game.SupportedExecutable,store.Receipt(id))));
                 if(state.FolderExists) {
-                    await Engine(new("ValidateForLaunch",ReceiptPath:store.Receipt(id),ReadOnly:true));
                     if(!routingReady)throw new InvalidOperationException("Enable game-specific settings in Settings and restart Windows before launching this private setup. To play with the system driver, use Use default settings first.");
+                    if(!driverOriginal)throw new InvalidOperationException("Driver compatibility needs review. Check support or return this game to the system driver first.");
                     if(!game.Supported)throw new InvalidOperationException("Game executable changed. Return its private set to stock before launching for rediscovery.");
                     if(state.CompatibilityRepairRequired)throw new InvalidOperationException("This private setup needs a compatibility update. Use default settings, then prepare a fresh original 512 MiB copy before launching.");
                     if(!state.Configured)throw new InvalidOperationException("Existing private setup is unverified. Import its recovery record or recover it before launching through this app.");

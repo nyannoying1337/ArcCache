@@ -55,6 +55,8 @@ The Graphics page also shows whole-PC RAM and the shared Intel disk-cache size. 
 
 > **These are unsigned previews.** Loading tests do not prove effective shader-cache capacity. 8/16 GiB gameplay and large-cache reload remain unverified; a large cache can require roughly its size in contiguous RAM. [Test coverage and compatibility](docs/TESTING.md).
 
+**You are browsing the experimental branch.** Use `main` for the standard source.
+
 ## Get started
 
 A first-run introduction explains setup and recovery. Reopen it from Settings. The game page shows one setup guide and visible cache-size buttons; unavailable sizes include a reason.

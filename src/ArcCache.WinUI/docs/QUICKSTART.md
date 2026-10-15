@@ -1,6 +1,6 @@
-# Arc Cache standard preview
+# Arc Cache experimental preview
 
-Download the matching Windows x64 ZIP from this repository's [Releases](https://github.com/nyannoying1337/ArcCache/releases). Extract the **entire** folder and run `ArcCache.exe`. The unsigned self-contained app does not require Python, PowerShell commands, or a .NET SDK on the player's PC. The declared minimum is Windows 10 build 19041; testing was on Windows 11.
+Download the matching Windows x64 ZIP from this repository's [Releases](https://github.com/nyannoying1337/ArcCache/releases). Extract the **entire** folder and run `ArcCache.Experimental.exe`. The unsigned self-contained app does not require Python, PowerShell commands, or a .NET SDK on the player's PC. The declared minimum is Windows 10 build 19041; testing was on Windows 11.
 
 ## Choose a version
 
@@ -39,7 +39,7 @@ Gameplay loading was checked in Witcher 3 with a private copy. Menu loading was 
 
 2/4 GiB constructors, patch hashes, tamper rejection, receipts/recovery, semantic ACL equality, consent gates, Steam fixtures, and quiet UI polling have automated checks. Actual capacity/growth effects remain unmeasured. 8/16 GiB passed isolated B580 D3D12 device/pipeline creation probes and reload-wrapper/unwind tests, **not** large-cache gameplay/reload. Very large files can require roughly their file size in contiguous RAM: the larger patch does not implement a low-memory Intel parser.
 
-For source build/test instructions see [the app README](../README.md). Proprietary DLL test inputs are optional local files, not shipped fixtures.
+For source build/test instructions see [the app README](../README.md) and [the larger-cache research README](../../../research/LargeCache/README.md). Proprietary DLL test inputs are optional local files, not shipped fixtures.
 
 ## Troubleshooting logs
 
