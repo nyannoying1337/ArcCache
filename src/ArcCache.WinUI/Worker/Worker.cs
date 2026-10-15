@@ -163,7 +163,7 @@ class Worker {
     static object Status(bool signatures=false) {
         var package=DriverCatalog.Selected();if(package==null)throw new InvalidOperationException("No active Intel display package was found.");
         string identityBefore=DriverCatalog.Identity(package);string folder=package.Folder;var files=DriverCatalog.Names.Select(n=>DriverCatalog.Review(Path.Combine(folder,n),signatures)).ToArray();
-        string reason;bool qualified=DriverCatalog.CohortQualified(package,out reason);string currentIdentity=DriverCatalog.Identity(DriverCatalog.Selected());if(identityBefore!=currentIdentity){qualified=false;reason="The active package changed during review. Check again after the driver installer finishes.";}foreach(var reviewed in files)reviewed.PatchEnabled=reviewed.PatchEnabled&&qualified;var xe2=files.First(f=>f.Name=="igd12um64xe2.dll");object setting;
+        string reason;bool qualified=DriverCatalog.CohortQualified(package,out reason);if(DriverCatalog.PrefersXe1(package.Adapter)){qualified=false;reason="Run the Xe1 graphics check before setting up a game.";}string currentIdentity=DriverCatalog.Identity(DriverCatalog.Selected());if(identityBefore!=currentIdentity){qualified=false;reason="The active package changed during review. Check again after the driver installer finishes.";}foreach(var reviewed in files)reviewed.PatchEnabled=reviewed.PatchEnabled&&qualified;var xe2=files.First(f=>f.Name=="igd12um64xe2.dll");object setting;
         using(var key=Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options"))setting=key==null?null:key.GetValue("DevOverrideEnable",null);
         bool reboot=false;
         if(File.Exists(IsolationControl.ReceiptPath)) {

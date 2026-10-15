@@ -4,6 +4,7 @@ public class AdapterPackage {public string Id,Adapter,Version,Folder;}
 public class DriverFileReview {public string Name,Version,Hash,Signature,State,Error;public long Size;public int CandidateCount;public int[] CandidateOffsets;public bool PatchEnabled,StructurallyPatchable,ExperimentalTestEnabled;public string Assessment;}
 public static class DriverCatalog {
  public const string KnownVersion="32.0.101.9034",Xe3Original="029E091F5B67A7418B39900E2AC4EAC9EF64767595E0138FF6569CC42FEB4911";
+ public static bool PrefersXe1(string adapter){return System.Text.RegularExpressions.Regex.IsMatch(adapter??"",@"\bA\d{2,3}(?:M)?\b",System.Text.RegularExpressions.RegexOptions.IgnoreCase);}
  public static readonly string[] Names={"igd12um64xe2.dll","igd12um64xe3.dll","igd12um64xeh.dll"};
  [StructLayout(LayoutKind.Sequential)]struct DeviceInfo {public uint Size;public Guid ClassGuid;public uint DevInst;public UIntPtr Reserved;}
  [DllImport("setupapi.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern IntPtr SetupDiGetClassDevs(ref Guid guid,string enumerator,IntPtr window,uint flags);
@@ -47,6 +48,7 @@ public static class DriverCatalog {
   }return Engine.Hash(System.Text.Encoding.UTF8.GetBytes(String.Join("\n",fields)));
  }
  public static int[] CandidateOffsets(byte[] bytes){
+  var xe1=Xe1Patch.CandidateOffsets(bytes);if(xe1.Length>0)return xe1;
   byte[] signature=Engine.Hex("48895c2408574883ec2033ff48c741100000002048b80000000001000000893948894108");var found=new List<int>();
   if(bytes.Length<256||bytes[0]!=77||bytes[1]!=90)return found.ToArray();int nt=BitConverter.ToInt32(bytes,0x3c);
   if(nt<0||nt>bytes.Length-26||BitConverter.ToUInt32(bytes,nt)!=0x4550||BitConverter.ToUInt16(bytes,nt+4)!=0x8664)return found.ToArray();
@@ -68,7 +70,7 @@ public static class DriverCatalog {
    else r.State="Unqualified";
    r.StructurallyPatchable=r.CandidateCount==1;
    r.ExperimentalTestEnabled=r.Name.Equals("igd12um64xe3.dll",StringComparison.OrdinalIgnoreCase)&&r.Hash==Xe3Original&&r.CandidateCount==1&&r.CandidateOffsets[0]==0x1900e0;
-   r.Assessment=r.ExperimentalTestEnabled?"This driver file can be tested. Create a separate test copy, then run the graphics check. Games and larger caches are not verified yet.":r.PatchEnabled?"This file matches a supported version. The other files in the installed driver must also match before a game can be set up.":r.CandidateCount==1?"This file looks similar to a supported version, but it still needs review before a test copy can be offered. No files were changed.":r.CandidateCount>1?"The check found more than one possible location to change. This build cannot safely choose one; keep default settings.":"This build does not recognise a supported cache setting in this file. Keep default settings.";
+   r.Assessment=r.Name.Equals(Xe1Patch.FileName,StringComparison.OrdinalIgnoreCase)&&r.CandidateCount==1?"This exact Xe1 file has a reviewed 1 GiB test patch. Run the unchanged copy first on matching graphics hardware.":r.ExperimentalTestEnabled?"This driver file can be tested. Create a separate test copy, then run the graphics check. Games and larger caches are not verified yet.":r.PatchEnabled?"This file matches a supported version. The other files in the installed driver must also match before a game can be set up.":r.CandidateCount==1?"This file looks similar to a supported version, but it still needs review before a test copy can be offered. No files were changed.":r.CandidateCount>1?"The check found more than one possible location to change. This build cannot safely choose one; keep default settings.":"This build does not recognise a supported cache setting in this file. Keep default settings.";
    if(signatures)r.Signature=WindowsPlatform.EmbeddedSignature(file);
   }catch(Exception e){r.Error=e.Message;r.State="Unavailable";r.Assessment="The DLL could not be inspected: "+e.Message;r.ExperimentalTestEnabled=false;r.PatchEnabled=false;}return r;
  }

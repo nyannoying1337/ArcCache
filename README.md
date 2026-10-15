@@ -30,6 +30,12 @@ The driver image reviewed by this project has a **512 MiB default cache-file lim
 
 **What this could help with:** retaining more reusable shader data, reducing repeated compilation when revisiting content, and investigating cache-related stutter. These are the intended benefits, **not measured performance claims**. Larger limits do not fix every source of stutter, create shaders that have never been compiled, or guarantee higher FPS. Games can override driver defaults; larger caches also use more disk space and can increase memory/loading costs. See [test coverage and limitations](docs/TESTING.md).
 
+## Xe1 / Arc A-series
+
+Both versions include a hash-pinned **Xe1 1 GiB test patch** for `igd12um64xeh.dll` in drivers 32.0.101.9034 and 32.0.101.9150. Original/patched hardware checks are required before a game trial. Positive Arc A-series hardware and effective cache capacity remain unverified. [Definition and test boundaries](src/ArcCache.WinUI/docs/XE1-SUPPORT.md) · [First-run introduction proposal](docs/FIRST-RUN-INTRODUCTION-PLAN.md).
+
+Coverage includes A-series work and integrated-device discovery; it is not a B-series-only app. [Implemented coverage and larger-limit work](docs/INTEL-GRAPHICS-COVERAGE.md).
+
 ## Check a new driver
 
 Open **Graphics → Check support → Try patching** in either version. Arc Cache can test an unchanged copy and a 1 GiB copy in its separate graphics program, with live progress, logs and checked cleanup. The separate test leaves games and installed driver files unchanged. A pass offers **Choose a game and use this copy**, with an explicit 1 GiB game-trial workflow. Unknown drivers are not automatically promoted to reviewed definitions. [Read the test workflow and limits](src/ArcCache.WinUI/docs/GRAPHICS-TRIAL.md).
@@ -40,7 +46,7 @@ The Graphics page also shows whole-PC RAM and the shared Intel disk-cache size. 
 
 | | Standard preview | Large-cache experimental preview |
 | --- | --- | --- |
-| Download | [Standard release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-standard-guided-preview-2026.10.14) | [Experimental release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-experimental-guided-preview-2026.10.14) |
+| Download | [Standard release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-standard-xe1-preview-2026.10.15) | [Experimental release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-experimental-xe1-preview-2026.10.15) |
 | Presets | Original 512 MiB · 1 · 2 · 4 GiB | Standard presets + 8 · 16 GiB |
 | Source | [`main`](https://github.com/nyannoying1337/ArcCache/tree/main/src) | [`large-cache-experimental`](https://github.com/nyannoying1337/ArcCache/tree/large-cache-experimental/src) |
 | Start here if… | You want the standard workflow | You want larger-limit experiments, DLL scans and Xe3 device tests |
