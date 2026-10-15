@@ -7,7 +7,7 @@ Arc Cache lists active Intel graphics chips, including graphics built into a CPU
 | Driver files actually used | Available workflow |
 | --- | --- |
 | Exact reviewed Xe2 32.0.101.9034 image and complete package | Detect the running DirectX 12 game, set up its unchanged copy, observe loading, then try a cache-size preset |
-| Exact reviewed Xe3 32.0.101.9034 image | Separate graphics check in the preview version; per-game Xe3 setup remains unqualified |
+| Exact reviewed Xe3 32.0.101.9034 image | Separate graphics check and eligible 1 GiB game-trial path; positive Xe3 hardware/game results remain unverified |
 | Older HD/UHD/Iris, XeH, different OEM package or unknown version | Detection/inspection where an active 64-bit driver is registered; normal game patching remains blocked until a definition is reviewed |
 
 The B580 model-name restriction is removed. Every dependency hash and the driver version still has to match. A different name, a selected built-in chip, or a similar instruction pattern cannot override those checks. A running game must expose one unambiguous supported Intel renderer from the selected package.

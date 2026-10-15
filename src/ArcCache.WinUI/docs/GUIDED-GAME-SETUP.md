@@ -2,12 +2,12 @@
 
 ## First start
 
-Arc Cache shows a five-screen introduction covering graphics checks, game selection, setup, size selection and recovery. Next and Back navigate; Skip introduction dismisses it. The choice is saved in LocalAppData and shared between editions. Settings → Show introduction reopens it. The introduction does not change Windows, drivers or game files. Check my graphics opens the Graphics page without automatically running a patch.
+Arc Cache shows a short first-start introduction explaining graphics checks, game setup and recovery. You can skip it and reopen it from Settings. The introduction does not change Windows, drivers or game files. **Check my graphics** opens Graphics and starts a support check.
 
 ## Set up a game
 
 1. Open Graphics, select the Intel chip used by the game and choose Check support. When a separate test is required, choose Try patching and review its confirmation. Both original and patched checks must pass.
-2. Select an installed game or add an executable manually. Enable game-specific settings in Settings if required; that separate Windows operation needs manual administrator launch, confirmation and restart.
+2. Select an installed game or add an executable manually. If needed, open **Graphics** and choose **Allow game-specific graphics files**. Arc Cache explains the one-time Windows change and restart; start the app manually as an administrator only for that change.
 3. Start the game in DirectX 12 with Arc Cache open for detection. Close the game before Set up this game creates an unchanged copy.
 4. Start the game again. Arc Cache checks its loaded original copy automatically while open. Close the game after that check.
 5. Choose a supported size and apply it after confirmation. Play normally through its usual launcher. Use default settings removes the recorded setup when the game is closed.

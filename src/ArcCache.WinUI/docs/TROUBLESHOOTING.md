@@ -7,4 +7,4 @@
 
 Detailed logs are opt-in and rotate at about 2 MiB into one previous generation (about 4 MiB total). Individual diagnostic payloads are bounded to 16 KiB. Normal action/recovery logs continue when detailed logging is off. The toggle changes logging only: no game/system mutation, no elevated process, no changed driver qualification.
 
-Include the app version/standard-or-experimental variant, Windows version, GPU model, driver version, game name/DX12 mode, selected limit and exact failure message. Loaded paths/disk hashes are observations, not proof of shader capacity. The source retains legacy Witcher profile support for recovery, but normal detection and the monitor use the selected game rather than a Witcher-only whitelist.
+Include the app version, Windows version, Intel graphics model, driver version, game name and graphics mode, selected limit, and exact failure message. Loaded paths and disk hashes are observations; they do not prove shader-cache capacity or performance.

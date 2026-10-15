@@ -34,11 +34,14 @@ public sealed record GameSetupState(bool ReceiptExists,bool FolderExists,bool Re
 public sealed class AppStore {
     public string Root {get;}
     public string GamesDirectory=>Path.Combine(Root,"games");
+    public string RecentGamesPath=>Path.Combine(Root,"recent-games.json");
     public string LogPath {get;}
     public AppStore(string? root=null){Root=root??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap");Directory.CreateDirectory(GamesDirectory);Directory.CreateDirectory(Path.Combine(Root,"logs"));LogPath=Path.Combine(Root,"logs",DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff")+"-"+Environment.ProcessId+"-"+Guid.NewGuid().ToString("N")+"-winui.log");}
     public string Receipt(uint appId)=>Path.Combine(GamesDirectory,"steam-"+appId+".json");
     public string Receipt(SteamGame game)=>Receipt(game.Key);
     public string Receipt(string key){if(!ArcCap.GameIdentity.ValidKey(key))throw new InvalidDataException("Invalid game identity.");return Path.Combine(GamesDirectory,key+".json");}
+    public IReadOnlyList<string> ReadRecentGames(){try{if(!File.Exists(RecentGamesPath)||new FileInfo(RecentGamesPath).Length>65536)return [];return (JsonSerializer.Deserialize<string[]>(File.ReadAllText(RecentGamesPath))??[]).Where(ArcCap.GameIdentity.ValidKey).Distinct(StringComparer.OrdinalIgnoreCase).Take(8).ToArray();}catch(Exception e)when(e is IOException or UnauthorizedAccessException or JsonException){return [];}}
+    public void MarkRecentGame(string key){if(!ArcCap.GameIdentity.ValidKey(key))throw new InvalidDataException("Invalid game identity.");var items=new[]{key}.Concat(ReadRecentGames().Where(x=>!string.Equals(x,key,StringComparison.OrdinalIgnoreCase))).Take(8).ToArray();string temp=RecentGamesPath+".tmp";File.WriteAllText(temp,JsonSerializer.Serialize(items));File.Move(temp,RecentGamesPath,true);}
     public ReceiptState? Read(uint appId) => File.Exists(Receipt(appId))?JsonSerializer.Deserialize<ReceiptState>(File.ReadAllText(Receipt(appId)),new JsonSerializerOptions{PropertyNameCaseInsensitive=true}):null;
     public void Log(string message){try{File.AppendAllText(LogPath,DateTime.Now.ToString("HH:mm:ss ")+message+Environment.NewLine);}catch(IOException){}catch(UnauthorizedAccessException){}}
 }

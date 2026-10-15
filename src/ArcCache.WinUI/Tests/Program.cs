@@ -8,7 +8,7 @@ void Reject(Action body){try{body();}catch(InvalidDataException){return;}throw n
 GameLibraryTests.Run(Test,Check);
 Test("Introduction is shown for a new profile, stays dismissed across updates, and recovers invalid preferences",()=>{
  string root=Path.Combine(Path.GetTempPath(),"ArcWelcomeTest-"+Guid.NewGuid());
- try{var intro=new Introduction(root);Check(intro.ShouldShow,"New profile skipped introduction.");intro.Dismiss();Check(!new Introduction(root).ShouldShow,"Dismissal did not persist.");File.WriteAllText(Path.Combine(root,"introduction-version.txt"),"invalid");Check(new Introduction(root).ShouldShow,"Invalid preference hid introduction.");Check(Introduction.Screens.Length==5,"Introduction screen count changed unexpectedly.");}finally{if(Directory.Exists(root))Directory.Delete(root,true);}
+ try{var intro=new Introduction(root);Check(intro.ShouldShow,"New profile skipped introduction.");intro.Dismiss();Check(!new Introduction(root).ShouldShow,"Dismissal did not persist.");File.WriteAllText(Path.Combine(root,"introduction-version.txt"),"invalid");Check(new Introduction(root).ShouldShow,"Invalid preference hid introduction.");Check(Introduction.Screens.Length==1&&Introduction.Screens[0].Body.Contains("own copy")&&Introduction.Screens[0].Body.Contains("cache limit"),"Introduction does not explain the game-specific setup.");}finally{if(Directory.Exists(root))Directory.Delete(root,true);}
 });
 Test("Independent app instances do not collide or fail operations when a log is locked",()=>{
     string root=Path.Combine(Path.GetTempPath(),"ArcLogTest-"+Guid.NewGuid());
@@ -21,12 +21,17 @@ Test("Independent app instances do not collide or fail operations when a log is 
         Check(File.ReadAllText(second.LogPath).Contains("still works"),"Another instance stopped logging.");
     }finally{Directory.Delete(root,true);}
 });
+Test("Home dashboard recents persist newest-first, deduplicate and reject unsafe keys",()=>{
+ string root=Path.Combine(Path.GetTempPath(),"ArcRecentTest-"+Guid.NewGuid().ToString("N"));
+ try{var store=new AppStore(root);for(uint id=1;id<=10;id++)store.MarkRecentGame("steam-"+id);store.MarkRecentGame("steam-3");var recents=store.ReadRecentGames();Check(recents.Count==8&&recents[0]=="steam-3"&&!recents.Contains("steam-2"),"Recent games did not persist in bounded newest-first order.");try{store.MarkRecentGame("../../unsafe");throw new Exception("Unsafe recent-game key was accepted.");}catch(InvalidDataException){}}
+ finally{if(Directory.Exists(root))Directory.Delete(root,true);}
+});
 Test("The guide provides one next action from discovery to playing and handles older setups",()=>{
  Check(GameGuide.From(null,false,true,false,true).Action=="Launch","Passing a driver test leaves game discovery without an action.");
  Check(GameGuide.From(null,true,true,false,true).Action=="Prepare","Detected game does not offer setup.");
- Check(GameGuide.From(null,true,false,false,true).Action=="Settings","Windows setup step missing.");
+ Check(GameGuide.From(null,true,false,false,true).Action=="Graphics","Windows setup step does not open Graphics.");
  var receipt=new ReceiptState(5,"game.exe","game.exe.local",512,"prepared-runtime-unverified",new(),true);var state=new GameSetupState(true,true,true,true,receipt,null);
- Check(GameGuide.From(state,true,true,true,true).Title.StartsWith("Step 3")&&GameGuide.From(state,true,true,true,true).Action=="Launch","Unchanged game copy does not lead to a loading check.");
+ Check(GameGuide.From(state,true,true,true,true).Title=="Check the game setup"&&GameGuide.From(state,true,true,true,true).Action=="Launch","Unchanged game copy does not lead to a loading check.");
  state=state with{Receipt=receipt with{Status="original-control-loading-verified"}};Check(GameGuide.From(state,true,true,true,true).Action=="Apply","Verified game control does not lead to applying the size.");
  state=state with{Receipt=receipt with{MiB=1024}};Check(GameGuide.From(state,true,true,true,true).Title.Contains("ready to try")&&GameGuide.From(state,true,true,true,true).Action=="Launch","Patched game does not offer play.");
  Check(GameGuide.From(state,true,true,false,true).Action=="Restore","Older setup has no safe next action.");
@@ -35,8 +40,8 @@ Test("Plain game checks distinguish an observed copy from cache performance",()=
     string exe=@"C:\Games\Example\game.exe";
     Check(PlainLanguage.GameCheck("Game is not running.",exe).StartsWith("Start this game"),"Stopped game falsely reports a setup.");
     string result=PlainLanguage.GameCheck(exe+@".local\igd12um64xe2.dll",exe);
-    Check(result.Contains("own driver copy")&&result.Contains("not been measured"),"Loading observation claims a capacity/performance result.");
-    Check(PlainLanguage.GameCheck("Disk SHA-256: abc",exe).Contains("outside its custom setup"),"Different driver treated as a custom copy.");
+    Check(result.Contains("own graphics files")&&result.Contains("not been measured"),"Loading observation claims a capacity/performance result.");
+    Check(PlainLanguage.GameCheck("Disk SHA-256: abc",exe).Contains("outside its Arc Cache setup"),"Different driver treated as a custom copy.");
     Check(PlainLanguage.Error("Manually launch as administrator").Contains("Windows setting"),"Elevation prompt policy lost in plain error.");
     Check(PlainLanguage.Error("Hash mismatch").Contains("Stop here"),"Changed files encouraged unsafe retry.");
 });
@@ -59,22 +64,22 @@ Test("Opt-in diagnostics are local, persist preference, rotate and stop when dis
 Test("Inactive routing preserves the saved limit and gives an enable action",()=>{
     var receipt=new ReceiptState(3,"game.exe","game.exe.local",4096,"changed-runtime-unverified",new());
     var ui=SetupPresentation.From(new GameSetupState(true,true,true,true,receipt,null),true,false);
-    Check(ui.Installed.StartsWith("4 GiB saved")&&ui.Title=="Enable game-specific settings"&&ui.Next.Contains("restart Windows"),"Inactive routing lost saved cap or reported ready.");
+    Check(ui.Installed.StartsWith("4 GB saved")&&ui.Title=="Enable game-specific settings"&&ui.Next.Contains("restart Windows"),"Inactive routing lost saved cap or reported ready.");
 });
 Test("Routing statuses distinguish off, on and pending restart",()=>{
     Check(RoutingPresentation.Status(false,false).StartsWith("Off"),"Disabled routing shown as ready.");
     Check(RoutingPresentation.Status(true,false).StartsWith("On"),"Enabled routing shown as disabled.");
-    Check(RoutingPresentation.Status(true,true).StartsWith("Restart required"),"Pending enable shown as ready.");
-    Check(RoutingPresentation.Status(false,true).StartsWith("Restart required"),"Pending restore shown as completed.");
+    Check(RoutingPresentation.Status(true,true).StartsWith("Restart Windows"),"Pending enable shown as ready.");
+    Check(RoutingPresentation.Status(false,true).StartsWith("Restart Windows"),"Pending restore shown as completed.");
 });
 
 Test("Installed wide cap is distinct from unmeasured runtime behavior",()=>{
     var receipt=new ReceiptState(3,"game.exe","game.exe.local",4096,"changed-runtime-unverified",new());
     var state=new GameSetupState(true,true,true,true,receipt,null);
     var ui=SetupPresentation.From(state,true);
-    Check(ui.Installed.StartsWith("4 GiB set")&&ui.Title=="Ready to play"&&!ui.WaitingForControl,"Applied patch presented as missing or waiting for original control.");
-    Check(ui.Next.Contains("Play through your launcher")&&!ui.WaitingForControl,"Installed patch still shown as needing setup.");
-    Check(SetupPresentation.From(state,false).Installed.StartsWith("4 GiB set"),"Stale executable erased verified installed limit.");
+    Check(ui.Installed.StartsWith("4 GB set")&&ui.Title=="Ready to play"&&!ui.WaitingForControl,"Applied patch presented as missing or waiting for original control.");
+    Check(ui.Next.Contains("usual launcher")&&!ui.WaitingForControl,"Installed patch still shown as needing setup.");
+    Check(SetupPresentation.From(state,false).Installed.StartsWith("4 GB set"),"Stale executable erased verified installed limit.");
     Check(SetupPresentation.From(state with{ContentsValid=false,Error="Hash mismatch"},true).Title=="Fix this setup","Invalid disk files shown as applied.");
 });
 Test("Larger setup distinguishes an experimental test from inactive routing",()=>{
@@ -82,19 +87,19 @@ Test("Larger setup distinguishes an experimental test from inactive routing",()=
     var state=new GameSetupState(true,true,true,true,receipt,null);
     Check(SetupPresentation.From(state,true).Title=="Ready to try this setting","Untested larger patch was presented as proven gameplay.");
     var inactive=SetupPresentation.From(state,true,false);
-    Check(inactive.Installed.StartsWith("8 GiB saved")&&inactive.Installed.Contains("setting is off")&&inactive.Next.Contains("restart"),"Disabled routing was presented as an active installed patch.");
+    Check(inactive.Installed.StartsWith("8 GB saved")&&inactive.Installed.Contains("setting is off")&&inactive.Next.Contains("restart"),"Disabled routing was presented as an active installed patch.");
 });
 Test("Updated driver preserves saved cap but requires review",()=>{
     var receipt=new ReceiptState(4,"game.exe","game.exe.local",8192,"changed-runtime-unverified",new());
     var state=new GameSetupState(true,true,true,true,receipt,null);
     var ui=SetupPresentation.From(state,true,true,false);
-    Check(ui.Installed.Contains("8 GiB saved")&&ui.Title=="Check your updated graphics driver"&&ui.Next.Contains("default settings"),"Driver update erased setup or presented outdated private driver as ready.");
+    Check(ui.Installed.Contains("8 GB saved")&&ui.Title=="Check your updated graphics driver"&&ui.Next.Contains("default settings"),"Driver update erased setup or presented outdated private driver as ready.");
 });
 Test("Old private setup needing compatibility migration blocks patching without erasing disk state",()=>{
     var receipt=new ReceiptState(3,"game.exe","game.exe.local",4096,"changed-runtime-unverified",new());
     var state=new GameSetupState(true,true,true,true,receipt,null,true);
     Check(!state.Configured&&!state.CanPrepare&&state.RecordValid,"Unsafe existing setup allowed patching or duplicate preparation.");
-    var ui=SetupPresentation.From(state,true);Check(ui.Installed.StartsWith("4 GiB set")&&ui.Next.Contains("set it up again"),"Migration erased installation status or failed to give recovery steps.");
+    var ui=SetupPresentation.From(state,true);Check(ui.Installed.StartsWith("4 GB set")&&ui.Next.Contains("set it up again"),"Migration erased installation status or failed to give recovery steps.");
 });
 Test("Setup workflow advances from detection through control to patch",()=>{
     Check(SetupPresentation.From(null,false).Title.Contains("Start this game"),"Missing detection step.");
@@ -123,10 +128,13 @@ Test("Steam artwork resolves flat, direct app-ID and hashed folder assets with i
 Test("Safety warnings stay brief while retaining multiplayer, anti-cheat and unknown risk",()=>{
     JsonElement Assessment(bool allowed,string? marker,string reason,string multi)=>JsonSerializer.SerializeToElement(new{Allowed=allowed,Marker=marker,Message=reason,Multiplayer=multi});
     Check(!SafetyPresentation.From(Assessment(true,null,"Clear","Steam reports single-player")).Warn,"Positive scan creates warning clutter.");
-    foreach(var data in new[]{Assessment(false,"EasyAntiCheat","Indicator found","Unknown"),Assessment(false,null,"Steam declares multiplayer/co-op","Steam reports multiplayer/co-op"),Assessment(false,null,"Unavailable","Unknown")}){
-        var notice=SafetyPresentation.From(data);Check(notice.Warn&&notice.Message.Contains("account penalties")&&notice.Message.Contains("original driver")&&notice.Message.Length<200,"Risk or next action lost in simplified message.");
-    }
-    Check(SafetyPresentation.From(Assessment(false,null,"Steam declares Valve Anti-Cheat","Unknown")).Title=="Anti-cheat detected","VAC declaration treated as generic multiplayer.");
+    var antiCheat=SafetyPresentation.From(Assessment(false,"EasyAntiCheat","Indicator found","Unknown"));
+    var multiplayer=SafetyPresentation.From(Assessment(false,null,"Steam declares multiplayer/co-op","Steam reports multiplayer/co-op"));
+    var unknown=SafetyPresentation.From(Assessment(false,null,"Unavailable","Unknown"));
+    Check(antiCheat.Warn&&antiCheat.Message.Contains("anti-cheat warning")&&antiCheat.Message.Contains("original driver"),"Anti-cheat warning lost its safe next action.");
+    Check(multiplayer.Warn&&multiplayer.Message.Contains("account penalties")&&multiplayer.Message.Contains("original driver"),"Online warning lost its safe next action.");
+    Check(unknown.Warn&&unknown.Title.Contains("safety is unknown")&&unknown.Message.Contains("Continue only if"),"Unknown game safety was presented as safe.");
+    Check(SafetyPresentation.From(Assessment(false,null,"Steam declares Valve Anti-Cheat","Unknown")).Title=="This game uses anti-cheat","VAC declaration treated as generic multiplayer.");
 });
 Test("SCSKiller bridge uses selected Steam ID, child-only Intel opt-in and no shell",()=>{
     var command=ScsKillerBridge.Command(Path.Combine(Path.GetTempPath(),"scskiller.exe"),"compile",292030);

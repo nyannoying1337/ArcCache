@@ -1,6 +1,6 @@
 # Private drivers: the one-time Windows setting
 
-**Enable Enable game-specific settings once, then restart Windows.** This is required by this app's per-game routing workflow. Run Arc Cache as administrator yourself for this change only; normal play and normal app use do not need administrator rights. The app never opens an elevation prompt or enables this silently.
+**Allow game-specific graphics files once, then restart Windows.** This is required for this app's per-game setup. Run Arc Cache as administrator yourself for this change only; normal play and normal app use do not need administrator rights. The app never opens an elevation prompt or enables this silently.
 
 ## What it does
 
@@ -24,7 +24,7 @@ Close the game and choose **Use default settings** on its page. Arc Cache checks
 
 ## Undo the Windows setting
 
-Remove your private game setups first. Manually run Arc Cache as administrator, open Settings, choose **Restore previous Windows setting**, confirm, and restart Windows. The saved previous value is restored; if it was already enabled, restoring does not switch it off. Keep `%LOCALAPPDATA%/IntelArcCacheCap/developer-override.json` for recovery. The worker blocks restore while known private game sets remain.
+Remove your game-specific setups first. Manually run Arc Cache as administrator, open Graphics, choose **Restore previous setting**, confirm, and restart Windows. The saved previous value is restored; if it was already enabled, restoring does not switch it off. Keep `%LOCALAPPDATA%/IntelArcCacheCap/developer-override.json` for recovery. The worker blocks restore while known game-specific sets remain.
 
 ## Set it and close the app
 

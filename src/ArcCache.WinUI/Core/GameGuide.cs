@@ -1,14 +1,14 @@
 namespace ArcCache.Core;
 public sealed record GameGuide(string Title,string Body,string Action,string Button){
  public static GameGuide From(GameSetupState? state,bool detected,bool routing,bool compatible,bool trialAvailable){
-  if(state?.FolderExists==true&&!state.Configured)return new("This setup needs attention","Use the saved setup record to recover it before creating another copy.","Recover","Open recovery details");
-  if(state?.Configured==true&&!compatible)return new("Start fresh with the tested driver","This game still has an older setup. Restore its default settings first; your shader cache stays as it is.","Restore","Use default settings");
-  if(!compatible&&!trialAvailable)return new("First, check your graphics driver","Open Graphics and run the check. If a separate test passes, you can come back here to set up a game.","Graphics","Open Graphics");
-  if(!routing)return new("One-time Windows setup","Enable game-specific settings in Settings, then restart Windows. Arc Cache will save your progress.","Settings","Open Settings");
-  if(!detected)return new("Step 1 · Start the game","Choose DirectX 12 in the game's launch options. Leave it at the menu with Arc Cache open; the app will find its files automatically.","Launch","Start game through your launcher");
-  if(state?.Configured!=true)return new("Step 2 · Set up this game","Close the game first. Arc Cache will create its own unchanged driver copy; other games keep their usual settings.","Prepare","Set up this game");
-  if(state.Receipt!.MiB==512&&state.Receipt.Status!="original-control-loading-verified")return new("Step 3 · Start the game once","Start in DirectX 12. Keep Arc Cache open: it will check the game's new copy automatically. Close the game after the check finishes.","Launch","Start game and check setup");
-  if(state.Receipt.MiB==512)return new("Step 4 · Apply your cache size","The game's unchanged copy loaded successfully. Close the game, then apply the selected size below.","Apply","Apply selected cache size");
+  if(state?.FolderExists==true&&!state.Configured)return new("This setup needs attention","Open recovery details and import the saved setup record before setting up this game again.","Recover","Open recovery details");
+  if(state?.Configured==true&&!compatible)return new("Update this game’s setup","This game has older graphics files. Choose Use default settings, then set it up again. Your shader cache stays as it is.","Restore","Use default settings");
+  if(!compatible&&!trialAvailable)return new("Check graphics support first","Open Graphics and check your Intel driver. If a separate test is available, Arc Cache will guide you through it.","Graphics","Open Graphics");
+  if(!routing)return new("Allow game-specific graphics files","Open Graphics to allow this one-time Windows setting. Arc Cache will explain the change; restart Windows if asked. Arc Cache will keep your place.","Graphics","Open Graphics");
+  if(!detected)return new("Start the game","If the game offers DirectX 12, choose it. Leave the game at the main menu and keep Arc Cache open so it can find the game files.","Launch","Start through your launcher");
+  if(state?.Configured!=true)return new("Set up this game","Close the game first. Arc Cache will make a separate set of graphics files for this game. Your normal driver files stay unchanged.","Prepare","Set up this game");
+  if(state.Receipt!.MiB==512&&state.Receipt.Status!="original-control-loading-verified")return new("Check the game setup","Start the game in DirectX 12 and leave Arc Cache open. It will check that the game can load its separate graphics files. Close the game when the check finishes.","Launch","Start game and check copy");
+  if(state.Receipt.MiB==512)return new("Choose a cache size","The game loaded its copy. Close the game, choose a size below, and apply it.","Apply","Apply cache size");
   return new(state.Receipt.Trial?"Your game is set up · ready to try":"Your game is set up · ready to play","Start in DirectX 12 through your launcher. Use default settings below whenever you want to undo this game's setup. Cache growth and performance improvements have not been measured.","Launch","Play through your launcher");
  }
 }

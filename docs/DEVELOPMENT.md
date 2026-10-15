@@ -53,4 +53,4 @@ Build `research/LargeCache/build-xe3-probe.cmd` before publishing to include `Ar
 
 ## Native graphics-check helper
 
-Both app builds compile `src/ArcCache.Probe/DriverProbe.cpp` through its incremental build target. Install Visual Studio C++ Build Tools with the Windows SDK. The helper is bundled in downloads; users do not need a compiler. `src/ArcCache.Probe/build.cmd` can also build it directly.
+The app build compiles `src/ArcCache.Probe/DriverProbe.cpp` through its incremental build target. Install Visual Studio C++ Build Tools with the Windows SDK. The helper is bundled in downloads; users do not need a compiler. `src/ArcCache.Probe/build.cmd` can also build it directly.

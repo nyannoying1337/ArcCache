@@ -14,7 +14,7 @@ Tests establish the behavior listed here. They do not establish support for ever
 
 The reviewed Xe3 32.0.101.9034 DLL has one independently located cache constructor. Original/1/2/4 GiB copies are checked by full image hashes and preservation of bytes outside that constructor. Isolated constructor tests use a stub for the external helper; they are not graphics-driver loading tests.
 
-The experimental build offers an **isolated device-test bundle** for that reviewed image. It copies the active package into a private folder for its own probe, backs up the original Xe3 DLL/ACL, validates the copied files and requires explicit consent before running. No game or system driver is replaced. A successful probe records private Xe3 module observation, D3D12 device creation and a trivial compute-pipeline creation. No GPU work is dispatched. A small shader-cache entry may be created.
+The app offers an **isolated device-test bundle** for that reviewed image. It copies the active package into a private folder for its own probe, backs up the original Xe3 DLL/ACL, validates the copied files and requires explicit consent before running. No game or system driver is replaced. A successful probe records private Xe3 module observation, D3D12 device creation and a trivial compute-pipeline creation. No GPU work is dispatched. A small shader-cache entry may be created.
 
 Xe3 hardware is required on the tester's machine, not the development machine. Runtime/game compatibility and effective capacity are not yet established. Xe3 per-game profiles remain unqualified; Xe2's 8/16 GiB reload patch must not be applied to Xe3.
 
@@ -22,7 +22,7 @@ The isolated original-control preparation and execution were exercised against t
 
 ## Automatic DLL assessment
 
-The experimental scanner inspects the selected DLL rather than guessing from GPU branding. It reports SHA-256, version, executable-section constructor matches and offline embedded-signature status. One signature match is a structural candidate. Multiple matches are ambiguous. No match means this build has no applicable constructor pattern.
+The Graphics scanner inspects the selected DLL rather than guessing from GPU branding. It reports SHA-256, version, executable-section constructor matches and offline embedded-signature status. One signature match is a structural candidate. Multiple matches are ambiguous. No match means this build has no applicable constructor pattern.
 
 Unknown image hashes can be assessed, but cannot be patched merely because a pattern matches. A reviewed patch definition validates the full source image and exact output bytes. A device-test result is separate from a qualified per-game profile.
 
@@ -44,4 +44,4 @@ Fixtures cover Epic base-game/incomplete/DLC filtering, Legendary indexes, Battl
 
 Worker checks verify that non-Steam safety stays unknown without Steam category data and that read-only discovery never pins a stopped game's profile. Launch plans are constructed without executing manifest arguments or uninstall commands. Actual authentication, game launching and private-driver loading across every third-party launcher are not established by these fixtures. The launcher coverage table describes installation-record support, not universal game compatibility.
 
-The unified library preview passes 45 Core/worker checks and seven standalone backend identity/profile checks. A read-only local discovery/render check found Steam, Ubisoft, Xbox-folder and EA records with unique keys; no game or driver setup was installed by that check. Native helper and app builds passed.
+The test project covers launcher parsing, profile identity, UI presentation rules, setup and recovery policy, consent gates, diagnostics and the SCSKiller bridge. Its fixtures use temporary directories; optional worker and native checks are documented in [development](DEVELOPMENT.md). Test results do not replace hardware/game compatibility testing described above.

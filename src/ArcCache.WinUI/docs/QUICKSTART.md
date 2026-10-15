@@ -1,19 +1,19 @@
-# Arc Cache experimental preview
+# Getting started with Arc Cache
 
 Download the matching Windows x64 ZIP from this repository's [Releases](https://github.com/nyannoying1337/ArcCache/releases). Extract the **entire** folder and run `ArcCache.exe`. The unsigned self-contained app does not require Python, PowerShell commands, or a .NET SDK on the player's PC. The declared minimum is Windows 10 build 19041; testing was on Windows 11.
 
-## One preview
+## One app
 
-Run `ArcCache.exe`. The unified preview includes standard limits plus reviewed experimental 8/16 GiB options, graphics checks and driver-update monitoring. Limits still depend on the exact installed driver; newer game trials currently offer Default/1 GiB. Older experimental releases remain available for recovery, but no separate experimental app is needed. Close older Arc Cache instances before using this build; settings and receipts are shared.
+Run `ArcCache.exe`. This app includes game setup, driver checks, monitoring and the larger-cache options described in the support guide. The available sizes depend on the exact driver files. Close any older Arc Cache instance before using this build; settings and setup records are shared.
 
-The first-run introduction can be skipped and reopened in Settings. Refresh games reads local launcher installation records. Add game lets you select a 64-bit executable from another launcher or a standalone game. [Launcher coverage and launch behavior](../../../docs/GAME-LIBRARIES.md).
+**Check my graphics** opens Graphics and starts the support check. The first-run introduction can be skipped and reopened in Settings. Refresh games reads local launcher installation records. Add game lets you select a 64-bit executable from another launcher or a standalone game. [Launcher coverage and launch behavior](../../../docs/GAME-LIBRARIES.md).
 
 ## First game: five steps
 
-1. In Settings, enable **Enable game-specific settings** once, using a manually administrator-launched app, then restart Windows. [Why this is required](PRIVATE-DRIVERS.md).
+1. Open **Graphics** and choose **Allow game-specific graphics files**. Arc Cache explains the one-time Windows change and restart needed. Start Arc Cache manually as an administrator only for this change; afterward, open it normally. [Why this is required](PRIVATE-DRIVERS.md).
 2. Open the app normally. Select an installed game or choose Add game…, launch it in DX12 with the system driver, and leave it at the menu so the app can detect its rendering executable.
-3. Close the game. Prepare its unchanged original 512 MiB private copy after reviewing the warning. This uses about 608 MiB per game.
-4. Launch DX12 again; keep the app open until it observes the original private copy loading. Close the game after verification.
+3. Close the game. Choose **Set up this game** to make an unchanged copy of its Intel graphics files. This uses about 608 MiB per game.
+4. Launch DirectX 12 again; keep Arc Cache open until it checks that the game can use its separate files. Close the game after verification.
 5. Select a preset and apply it after confirmation. Launch normally through its usual launcher. The app can now be closed unless you want the overlay.
 
 Read and acknowledge multiplayer/anti-cheat risk before applying. Detection is incomplete; a warning is not a guarantee that a game will accept modified driver files or that your account is safe. No anti-cheat is bypassed.

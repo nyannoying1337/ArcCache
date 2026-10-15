@@ -4,7 +4,7 @@ Intel describes the Arc A-series / Alchemist architecture as [Xe-HPG](https://ww
 
 ## Available now
 
-Both apps can inspect the exact Xe1 images below, make an unchanged control and a 1 GiB test copy, run the hardware check with the requested module name, and continue to the existing explicit game-trial guide after both tests pass on matching hardware. Arc A-series adapter names preselect the Xe1 file; that suggestion does not grant patch approval. File hashes and runtime checks still decide eligibility.
+The app can inspect the exact Xe1 images below, make an unchanged control and a 1 GiB test copy, run the graphics check with the requested module name, and offer the 1 GiB game-trial guide after both checks pass. Arc A-series adapter names preselect the Xe1 file; that suggestion does not grant patch approval. File hashes and runtime checks still decide eligibility. No positive Arc A-series hardware or game result is available.
 
 | Version | Original SHA-256 | 1 GiB output SHA-256 | Constructor file offset / RVA |
 | --- | --- | --- | --- |
@@ -25,4 +25,4 @@ No Arc A-series GPU is available on the development machine. Positive Xe1 driver
 
 The native helper accepts Xe1 explicitly and verifies the loaded file came from its own test directory. A B580 cannot count as a positive Xe1 hardware test: if its unchanged Xe1 copy does not load, the app stops without making a patched copy. Matching source/dependency checks, explicit risk consent, per-game original-copy loading, owned-file rollback, and Windows integrity enforcement remain in place. Older `igd12um64xel.dll` / Xe-L is not included by this definition.
 
-Existing genuine Xe2/Xe3 results from the previous pinned helper remain usable; their original helper hash is accepted only for those generations, never as Xe1 evidence.
+Xe1, Xe2 and Xe3 test results are kept separate. Passing a test on one generation does not qualify another generation or an unknown driver image.

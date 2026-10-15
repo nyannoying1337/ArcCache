@@ -1,6 +1,6 @@
 # Arc Cache desktop app
 
-The WinUI 3 application handles Steam discovery, private-copy setup, presets, loading observations, recovery and optional diagnostics. It uses the separate compiled safety worker for validated operations. The installed system driver remains original.
+The WinUI 3 application handles local game discovery, manual games, private-copy setup, cache presets, loading observations, recovery and optional diagnostics. It uses the separate compiled safety worker for validated operations. The installed system driver remains original.
 
 ## Guides
 
@@ -12,7 +12,7 @@ The WinUI 3 application handles Steam discovery, private-copy setup, presets, lo
 
 ## Behavior
 
-New game profiles are discovered from a unique running DX12 executable under the selected Steam install and its loaded original Intel module. Executable and package hashes are pinned. Preparation, limit changes and removal require explicit consent and a closed game. The original private copy must be observed loading before a patched limit is applied.
+New game profiles can be discovered from local launcher records or added by selecting a 64-bit game executable. Before setup, the app observes one running DX12 executable under the selected installation and the original Intel module it loaded. Executable and package hashes are pinned. Preparation, limit changes and removal require explicit consent and a closed game. The original private copy must be observed loading before a patched limit is applied.
 
 The header distinguishes saved disk state from runtime observations. Missing receipts, changed files, extra files, unknown packages and changed executables stop affected operations. Recovery stays available where the recorded private set verifies. Old debug-helper-incompatible sets require return-to-stock and fresh preparation.
 

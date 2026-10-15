@@ -25,7 +25,7 @@ public static class DriverTrial {
   var review=DriverCatalog.Review(full,true);bool xe1Allowed=name!=Xe1Patch.FileName||Xe1Patch.Definitions.Any(d=>d.Original==review.Hash);bool eligible=xe1Allowed&&review.CandidateCount==1&&review.Signature!=null&&review.Signature.StartsWith("Valid");
   return new{Eligible=eligible,File=full,review.Hash,review.Version,review.CandidateCount,review.Signature,Message=eligible?"A separate 1 GiB test is available. This file is not approved for game setups by this check.":"No safe test can be offered: one matching instruction sequence and a trusted original file are required."};
  }
- public static void RequireReady(){Require(!IsolationControl.Administrator,"Run Arc Cache normally for this test, not as administrator.");Require(WindowsProbeReady(),"Enable game-specific settings in Settings and restart Windows before running this separate test.");}
+ public static void RequireReady(){Require(!IsolationControl.Administrator,"Run Arc Cache normally for this test, not as administrator.");Require(WindowsProbeReady(),"Open Graphics, enable game-specific settings, and restart Windows before running this separate test.");}
  public static bool Amd64Dll(string file) {
   using(var r=new BinaryReader(File.OpenRead(file))){if(r.BaseStream.Length<64||r.ReadUInt16()!=0x5a4d)return false;r.BaseStream.Position=60;uint nt=r.ReadUInt32();if(nt>r.BaseStream.Length-26)return false;r.BaseStream.Position=nt;if(r.ReadUInt32()!=0x4550||r.ReadUInt16()!=0x8664)return false;r.BaseStream.Position=nt+22;return (r.ReadUInt16()&0x2000)!=0;}
  }
