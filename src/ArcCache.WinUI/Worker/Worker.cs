@@ -9,7 +9,7 @@ using ArcCap;
 class Request {
     public bool RiskConfirmed {get;set;}
     public bool ReadOnly {get;set;}
-    public uint SteamAppId {get;set;}public string InstallDirectory {get;set;}
+    public uint SteamAppId {get;set;}public string InstallDirectory {get;set;}public string LibrarySource {get;set;}public string ExternalId {get;set;}public string SelectedExecutable {get;set;}
     public string DriverFile {get;set;}public string AdapterId {get;set;}public string Action {get;set;}public string Executable {get;set;}public string ReceiptPath {get;set;}public string SourceReceipt {get;set;}public string DriverFolder {get;set;}public int MiB {get;set;}public bool Confirmed {get;set;}
 }
 class Worker {
@@ -21,6 +21,7 @@ class Worker {
     static GameSafetyReport Safety(Request r) {
         var report=GameSafety.Assess(r.SteamAppId,r.InstallDirectory);
         if(!report.ScanComplete||report.Marker!=null)return report;
+        if(r.SteamAppId==0){report.Allowed=false;report.Multiplayer="Unknown";report.SteamStatus="No Steam game-mode data applies to this installation.";report.Message="Multiplayer and anti-cheat safety are unknown. Explicit risk acknowledgment is required.";return report;}
         try {
             System.Net.ServicePointManager.SecurityProtocol=System.Net.SecurityProtocolType.Tls12;
             var request=(System.Net.HttpWebRequest)System.Net.WebRequest.Create("https://store.steampowered.com/api/appdetails?appids="+r.SteamAppId.ToString(System.Globalization.CultureInfo.InvariantCulture)+"&l=english&filters=basic,categories");
@@ -54,7 +55,7 @@ class Worker {
     static void RequireNoKnownPrivateSets() {
         string root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap","games");
         if(!Directory.Exists(root))return;
-        foreach(string file in Directory.GetFiles(root,"steam-*.json")) {
+        foreach(string file in Directory.GetFiles(root,"*.json")) {
             var receipt=MatchedSet.Read(file);if(Directory.Exists(receipt.Folder))throw new InvalidOperationException("Remove configured private game sets before restoring developer routing. Existing set: "+receipt.Folder);
         }
     }
@@ -80,13 +81,13 @@ class Worker {
         Engine.CheckPath(path);using(var input=new BinaryReader(File.OpenRead(path))){if(input.BaseStream.Length<256||input.ReadUInt16()!=0x5A4D)throw new InvalidDataException("Not a PE executable.");input.BaseStream.Position=0x3c;uint header=input.ReadUInt32();if(header>input.BaseStream.Length-26)throw new InvalidDataException("Invalid PE header.");input.BaseStream.Position=header;if(input.ReadUInt32()!=0x4550||input.ReadUInt16()!=0x8664)throw new InvalidDataException("Only AMD64 game executables are supported.");input.BaseStream.Position=header+24;if(input.ReadUInt16()!=0x20b)throw new InvalidDataException("Expected PE32+ game.");}
     }
     static object DiscoverGame(Request r) {
-        if(r.SteamAppId==0)throw new InvalidDataException("Steam app identity required.");
+        string gameKey=GameIdentity.Key(r.SteamAppId,r.LibrarySource,r.ExternalId,r.InstallDirectory);
         string root=Path.GetFullPath(r.InstallDirectory).TrimEnd(Path.DirectorySeparatorChar);Engine.CheckPath(root);
         string successful=r.SourceReceipt??SuccessfulTrial();Dictionary<string,object> trial=null;if(successful!=null)trial=DriverTrial.VerifySuccessful(successful,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"),false);
-        var previous=MatchedSet.ReadProfile(r.SteamAppId);string previousExe=null;
+        var previous=MatchedSet.ReadProfile(gameKey);string previousExe=null;
         if(previous==null&&r.ReceiptPath!=null&&File.Exists(r.ReceiptPath)) {
             var recovered=MatchedSet.Read(r.ReceiptPath);
-            if(recovered.Game!=null&&recovered.Game.AppId==r.SteamAppId&&Path.GetFullPath(recovered.Game.Root).Equals(root,StringComparison.OrdinalIgnoreCase)){if(!r.ReadOnly)MatchedSet.SaveProfile(recovered.Game);previous=recovered.Game;}
+            if(recovered.Game!=null&&MatchedSet.ProfileKey(recovered.Game)==gameKey&&Path.GetFullPath(recovered.Game.Root).Equals(root,StringComparison.OrdinalIgnoreCase)){if(!r.ReadOnly)MatchedSet.SaveProfile(recovered.Game);previous=recovered.Game;}
         }
         if(trial==null&&previous==null&&r.SteamAppId==292030) {
             string legacy=Path.Combine(root,@"bin\x64_dx12\witcher3.exe");
@@ -110,6 +111,7 @@ class Worker {
                 if(handle==IntPtr.Zero)continue;var path=new System.Text.StringBuilder(4096);uint length=4096;
                 if(!QueryFullProcessImageName(handle,0,path,ref length))continue;string exe=path.ToString();
                 if(!exe.StartsWith(root+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))continue;
+                if(r.SelectedExecutable!=null&&!Path.GetFullPath(r.SelectedExecutable).Equals(exe,StringComparison.OrdinalIgnoreCase))continue;
                 var modules=WindowsPlatform.ModulePaths(process.Id).ToArray();
                 if(!modules.Any(m=>Path.GetFileName(m).Equals("d3d12.dll",StringComparison.OrdinalIgnoreCase)))continue;
                 if(!modules.Any(m=>m.Equals(activeXe2,StringComparison.OrdinalIgnoreCase)))continue;
@@ -117,7 +119,7 @@ class Worker {
                 RequireAmd64Exe(exe);Isolation.RequireNoLocalD3D12(exe);
                 if(Directory.Exists(exe+".local")||File.Exists(exe+".local"))continue;
                 if(trial==null)RequireOriginalActivePackage();
-                candidates[exe]=new MatchedSet.ProfileInfo{Schema=trial==null?1:2,TrialReceipt=successful,AppId=r.SteamAppId,Root=root,Name=process.ProcessName,RelativeExecutable=exe.Substring(root.Length+1),Hash=IsolationControl.FileHash(exe),ObservedDriverHash=IsolationControl.FileHash(activeXe2),ObservedUtc=DateTime.UtcNow.ToString("o")};
+                candidates[exe]=new MatchedSet.ProfileInfo{Schema=trial==null?1:2,TrialReceipt=successful,AppId=r.SteamAppId,Source=r.LibrarySource,ExternalId=r.ExternalId,Root=root,Name=process.ProcessName,RelativeExecutable=exe.Substring(root.Length+1),Hash=IsolationControl.FileHash(exe),ObservedDriverHash=IsolationControl.FileHash(activeXe2),ObservedUtc=DateTime.UtcNow.ToString("o")};
             }catch(Exception e){if(!(e is IOException)&&!(e is UnauthorizedAccessException)&&!(e is InvalidOperationException)&&!(e is System.ComponentModel.Win32Exception))throw;unreadable++;}finally{if(handle!=IntPtr.Zero)CloseHandle(handle);}
         }
         if(candidates.Count==1){var entry=candidates.Single();if(!r.ReadOnly)MatchedSet.SaveProfile(entry.Value);return new{Validated=true,Executable=entry.Key,Message="DX12 game executable and original Intel driver observed automatically. No game files changed. Private-driver loading is still untested."};}
@@ -125,7 +127,7 @@ class Worker {
     }
     static string ObserveGame(string executable) {
         string full=Path.GetFullPath(executable),name=Path.GetFileNameWithoutExtension(full);var processes=System.Diagnostics.Process.GetProcessesByName(name);
-        if(processes.Length==0)return "This game is not running. Launch it through Steam, leave it at the menu, and check again.";
+        if(processes.Length==0)return "This game is not running. Start it through its launcher, leave it at the menu, and check again.";
         var lines=new List<string>();int inaccessible=0,matched=0;
         foreach(var process in processes)using(process) {
             IntPtr handle=OpenProcess(0x1000,false,(uint)process.Id);
@@ -138,7 +140,7 @@ class Worker {
                     lines.Add(name+" (PID "+process.Id+"): "+module+"\r\nDisk SHA-256: "+IsolationControl.FileHash(module));
             }catch{inaccessible++;}finally{if(handle!=IntPtr.Zero)CloseHandle(handle);}
         }
-        if(lines.Count==0)return inaccessible>0?"The game process could not be fully inspected. No driver-loading result is available.":matched==0?"The selected game installation is not running. Launch it through Steam and check again.":"This game is running, but no Xe2 driver path was observed. This does not confirm use of the private driver.";
+        if(lines.Count==0)return inaccessible>0?"The game process could not be fully inspected. No driver-loading result is available.":matched==0?"The selected game installation is not running. Start it through its launcher and check again.":"This game is running, but no Xe2 driver path was observed. This does not confirm use of the private driver.";
         return String.Join("\r\n",lines)+"\r\nLoaded path and disk hash observed. In-memory bytes and cache growth were not measured.";
     }
     static object VerifyControl(Request r) {
@@ -232,7 +234,7 @@ class Worker {
                 case "Import":Consent(r);var imported=MatchedSet.Read(r.SourceReceipt);MatchedSet.ValidateContents(imported);
                     var importedGame=imported.Game??MatchedSet.Profile(imported.Executable);
                     string importedRoot=imported.Game!=null?Path.GetFullPath(imported.Game.Root):MatchedSet.GameRoot(imported.Executable);
-                    if(r.SteamAppId!=0&&(importedGame.AppId!=r.SteamAppId||!importedRoot.Equals(Path.GetFullPath(r.InstallDirectory),StringComparison.OrdinalIgnoreCase)))throw new InvalidDataException("Receipt belongs to another Steam game installation.");
+                    if(r.InstallDirectory!=null&&(MatchedSet.ProfileKey(importedGame)!=GameIdentity.Key(r.SteamAppId,r.LibrarySource,r.ExternalId,r.InstallDirectory)||!importedRoot.Equals(Path.GetFullPath(r.InstallDirectory),StringComparison.OrdinalIgnoreCase)))throw new InvalidDataException("Receipt belongs to another game installation.");
                     if(r.Executable!=null&&!Path.GetFullPath(imported.Executable).Equals(Path.GetFullPath(r.Executable),StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("Receipt belongs to another installation.");
                     Engine.CheckPath(Path.GetDirectoryName(Path.GetFullPath(r.ReceiptPath)));byte[] importedBytes=System.Text.Encoding.UTF8.GetBytes(Json.Serialize(imported));
                     using(var stream=new FileStream(r.ReceiptPath,FileMode.CreateNew,FileAccess.Write,FileShare.None)){stream.Write(importedBytes,0,importedBytes.Length);stream.Flush(true);}if(imported.Game!=null)MatchedSet.SaveProfile(imported.Game);message="Existing setup imported; game files unchanged.";break;

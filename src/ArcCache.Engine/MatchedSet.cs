@@ -16,31 +16,34 @@ public class MatchedSetReceipt {
 public static class MatchedSet {
     public const string GameHash="2DF765398A3D1F165DB418271BE7200178320A4466817379F2FA0DC0001FB101";
     public class ProfileInfo {
-        public uint AppId;public string Name,RelativeExecutable,Hash,Launcher;
+        public uint AppId;public string Name,RelativeExecutable,Hash,Launcher,Source,ExternalId;
         public int Schema;public string Root,ObservedDriverHash,ObservedUtc,TrialReceipt;
     }
     static readonly ProfileInfo[] Profiles={
         new ProfileInfo{AppId=292030,Name="Witcher",RelativeExecutable=@"bin\x64_dx12\witcher3.exe",Hash=GameHash}
     };
     public static string ProfileDirectory {get{return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap","profiles");}}
-    public static string ProfilePath(uint appId){return Path.Combine(ProfileDirectory,"steam-"+appId+".json");}
+    public static string ProfileKey(ProfileInfo p){return GameIdentity.Key(p.AppId,p.Source,p.ExternalId,p.Root);}
+    public static string ProfilePath(uint appId){return ProfilePath("steam-"+appId);}
+    public static string ProfilePath(string key){Require(GameIdentity.ValidKey(key),"Invalid profile key.");return Path.Combine(ProfileDirectory,key+".json");}
     public static string ProfileExecutable(ProfileInfo p) {
-        Require(p!=null&&(p.Schema==1||p.Schema==2)&&p.AppId>0&&(p.Schema==1?p.ObservedDriverHash==Engine.Original:!String.IsNullOrWhiteSpace(p.TrialReceipt)&&System.Text.RegularExpressions.Regex.IsMatch(p.ObservedDriverHash??"","\\A[0-9A-F]{64}\\z"))&&p.Hash!=null&&System.Text.RegularExpressions.Regex.IsMatch(p.Hash,"\\A[0-9A-F]{64}\\z"),"Invalid observed game profile.");
+        Require(p!=null&&(p.Schema==1||p.Schema==2)&&GameIdentity.ValidKey(ProfileKey(p))&&(p.Schema==1?p.ObservedDriverHash==Engine.Original:!String.IsNullOrWhiteSpace(p.TrialReceipt)&&System.Text.RegularExpressions.Regex.IsMatch(p.ObservedDriverHash??"","\\A[0-9A-F]{64}\\z"))&&p.Hash!=null&&System.Text.RegularExpressions.Regex.IsMatch(p.Hash,"\\A[0-9A-F]{64}\\z"),"Invalid observed game profile.");
         Require(!String.IsNullOrWhiteSpace(p.Root)&&!String.IsNullOrWhiteSpace(p.RelativeExecutable)&&!Path.IsPathRooted(p.RelativeExecutable),"Invalid profile paths.");
         string root=Path.GetFullPath(p.Root).TrimEnd(Path.DirectorySeparatorChar),exe=Path.GetFullPath(Path.Combine(root,p.RelativeExecutable));
         Require(exe.StartsWith(root+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase)&&Path.GetExtension(exe).Equals(".exe",StringComparison.OrdinalIgnoreCase),"Observed executable escaped its game installation.");return exe;
     }
-    public static ProfileInfo ReadProfile(uint appId){string path=ProfilePath(appId);if(!File.Exists(path))return null;Engine.CheckPath(path);Require(new FileInfo(path).Length<=65536,"Profile is too large.");var p=new JavaScriptSerializer().Deserialize<ProfileInfo>(File.ReadAllText(path));ProfileExecutable(p);Require(p.AppId==appId,"Profile identity mismatch.");return p;}
+    public static ProfileInfo ReadProfile(uint appId){return ReadProfile("steam-"+appId);}
+    public static ProfileInfo ReadProfile(string key){string path=ProfilePath(key);if(!File.Exists(path))return null;Engine.CheckPath(path);Require(new FileInfo(path).Length<=65536,"Profile is too large.");var p=new JavaScriptSerializer().Deserialize<ProfileInfo>(File.ReadAllText(path));ProfileExecutable(p);Require(ProfileKey(p)==key,"Profile identity mismatch.");return p;}
     public static void SaveProfile(ProfileInfo profile) {
         ProfileExecutable(profile);Directory.CreateDirectory(ProfileDirectory);Engine.CheckPath(ProfileDirectory);
-        string path=ProfilePath(profile.AppId),tmp=path+"."+Guid.NewGuid().ToString("N")+".pending";
+        string path=ProfilePath(ProfileKey(profile)),tmp=path+"."+Guid.NewGuid().ToString("N")+".pending";
         File.WriteAllText(tmp,new JavaScriptSerializer().Serialize(profile));if(File.Exists(path))File.Replace(tmp,path,null);else File.Move(tmp,path);
     }
     public static ProfileInfo Profile(string executable) {
         string full=Path.GetFullPath(executable);
-        if(Directory.Exists(ProfileDirectory))foreach(string file in Directory.EnumerateFiles(ProfileDirectory,"steam-*.json").Take(10000)) {
-            uint id;if(!UInt32.TryParse(Path.GetFileNameWithoutExtension(file).Substring(6),out id))continue;
-            var profile=ReadProfile(id);if(full.Equals(ProfileExecutable(profile),StringComparison.OrdinalIgnoreCase))return profile;
+        if(Directory.Exists(ProfileDirectory))foreach(string file in Directory.EnumerateFiles(ProfileDirectory,"*.json").Take(10000)) {
+            string key=Path.GetFileNameWithoutExtension(file);if(!GameIdentity.ValidKey(key))continue;
+            var profile=ReadProfile(key);if(full.Equals(ProfileExecutable(profile),StringComparison.OrdinalIgnoreCase))return profile;
         }
         foreach(var profile in Profiles)if(full.EndsWith("\\"+profile.RelativeExecutable,StringComparison.OrdinalIgnoreCase))return profile;
         throw new InvalidDataException("No pinned private-driver profile for this executable path.");

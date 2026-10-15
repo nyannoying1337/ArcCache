@@ -1,6 +1,6 @@
 # Arc Cache: larger-cap experimental build
 
-Branch `large-cache-experimental`. The standard version is on this repository’s `main` branch. The native WinUI app and safety worker source are under `src/ArcCache.WinUI` and `src/ArcCache.Engine`.
+The unified preview on `main` includes these reviewed larger-cache options. Values above 4 GiB retain their explicit experimental/RAM warning. The native WinUI app and safety worker source are under `src/ArcCache.WinUI` and `src/ArcCache.Engine`.
 
 [Quick start](../../src/ArcCache.WinUI/docs/QUICKSTART.md) · [Private routing explained](../../src/ArcCache.WinUI/docs/PRIVATE-DRIVERS.md) · [Downloads](https://github.com/nyannoying1337/ArcCache/releases)
 
@@ -12,11 +12,11 @@ Install .NET 10 SDK and the Windows SDK, then run from the repository root:
 dotnet publish src/ArcCache.WinUI/App/ArcCache.WinUI.csproj -c Release -p:Platform=x64 -o out/ArcCache-Large-Experimental
 ```
 
-The app compiles the x64 safety worker using the installed .NET Framework compiler. Windows App SDK and .NET runtime are published self-contained. The executable is `ArcCache.Experimental.exe`. No Intel or Windows driver DLL is redistributed: a matching installed package is copied locally only after explicit setup consent.
+The app compiles the x64 safety worker using the installed .NET Framework compiler. Windows App SDK and .NET runtime are published self-contained. The executable is `ArcCache.exe`. No Intel or Windows driver DLL is redistributed: a matching installed package is copied locally only after explicit setup consent.
 
 ## Try the experimental build
 
-1. Close the game and the older Arc Cache app. Open `ArcCache.Experimental.exe`.
+1. Close the game and the older Arc Cache app. Open `ArcCache.exe`.
 2. Select a game with a working private setup. Choose 8 GiB first and apply after reading the separate experimental consent. If starting fresh, prepare/test the unchanged original copy before applying a limit.
 3. Launch DX12 in single-player/offline mode. Click Show live overlay; use borderless/windowed display.
 4. Check the loaded driver with the app. The overlay shows observed private/system path, qualified disk cap, private committed process memory, resident memory and shared Intel cache size/net growth. Module path/disk bytes do not prove the in-memory patch or shader capacity. Shared cache growth is not game-attributed.

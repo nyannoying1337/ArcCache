@@ -3,10 +3,11 @@ using System.Text;
 
 namespace ArcCache.Core;
 
-public sealed record SteamGame(uint AppId, string Name, string InstallDirectory, string? Artwork, string? DetectedExecutable=null, bool Detected=false, string? Icon=null, IReadOnlyList<string>? ArtworkFallbacks=null) {
+public sealed record SteamGame(uint AppId, string Name, string InstallDirectory, string? Artwork, string? DetectedExecutable=null, bool Detected=false, string? Icon=null, IReadOnlyList<string>? ArtworkFallbacks=null, string Source="Steam", string? ExternalId=null, string? ManualExecutable=null, string? NativeLaunchId=null) {
+    public string Key=>ArcCap.GameIdentity.Key(AppId,Source,ExternalId??"",InstallDirectory);
     public bool Supported => Detected;
     public string? SupportedExecutable => DetectedExecutable;
-    public string SupportLabel => Detected?"Ready to set up":"Start in DirectX 12 first";
+    public string SupportLabel => Source+" · "+(Detected?"Ready to set up":"Start in DirectX 12 first");
     public IReadOnlyList<string> ArtworkSources => (Artwork is null?Array.Empty<string>():new[]{Artwork}).Concat(ArtworkFallbacks??Array.Empty<string>()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     public IReadOnlyList<string> IconSources => (Icon is null?Array.Empty<string>():new[]{Icon}).Concat(ArtworkSources).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 }

@@ -11,7 +11,7 @@
 
 <p align="center">
   <strong>Choose a cache-limit preset for a game without replacing your installed Intel driver.</strong><br />
-  A native Windows app with Steam discovery, verified private copies and recovery controls.
+  A native Windows app with launcher discovery and manual games, verified private copies and recovery controls.
 </p>
 
 <p align="center">
@@ -32,47 +32,48 @@ The driver image reviewed by this project has a **512 MiB default cache-file lim
 
 ## Xe1 / Arc A-series
 
-Both source branches include a hash-pinned **Xe1 1 GiB test patch** for `igd12um64xeh.dll` in drivers 32.0.101.9034 and 32.0.101.9150. Original/patched hardware checks are required before a game trial. Positive Arc A-series hardware and effective cache capacity remain unverified. [Definition and test boundaries](src/ArcCache.WinUI/docs/XE1-SUPPORT.md).
+The preview includes a hash-pinned **Xe1 1 GiB test patch** for `igd12um64xeh.dll` in drivers 32.0.101.9034 and 32.0.101.9150. Original/patched hardware checks are required before a game trial. Positive Arc A-series hardware and effective cache capacity remain unverified. [Definition and test boundaries](src/ArcCache.WinUI/docs/XE1-SUPPORT.md).
 
 Coverage includes A-series test patches and integrated-device discovery; it is not a B-series-only app. [Driver support and verification](docs/INTEL-GRAPHICS-COVERAGE.md).
 
 ## Check a new driver
 
-Open **Graphics → Check support → Try patching** in either version. Arc Cache can test an unchanged copy and a 1 GiB copy in its separate graphics program, with live progress, logs and checked cleanup. The separate test leaves games and installed driver files unchanged. A pass offers **Choose a game and use this copy**, with an explicit 1 GiB game-trial workflow. Unknown drivers are not automatically promoted to reviewed definitions. [Read the test workflow and limits](src/ArcCache.WinUI/docs/GRAPHICS-TRIAL.md).
+Open **Graphics → Check support → Try patching** in the preview. Arc Cache can test an unchanged copy and a 1 GiB copy in its separate graphics program, with live progress, logs and checked cleanup. The separate test leaves games and installed driver files unchanged. A pass offers **Choose a game and use this copy**, with an explicit 1 GiB game-trial workflow. Unknown drivers are not automatically promoted to reviewed definitions. [Read the test workflow and limits](src/ArcCache.WinUI/docs/GRAPHICS-TRIAL.md).
 
 The Graphics page also shows whole-PC RAM and the shared Intel disk-cache size. Shader-cache RAM usage cannot currently be measured.
 
-## Pick your version
+## Download
 
-| | Standard preview | Large-cache experimental preview |
-| --- | --- | --- |
-| Download | [Standard release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-standard-setup-preview-2026.10.15) | [Experimental release](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-experimental-setup-preview-2026.10.15) |
-| Presets | Original 512 MiB · 1 · 2 · 4 GiB | Standard presets + 8 · 16 GiB |
-| Source | [`main`](https://github.com/nyannoying1337/ArcCache/tree/main/src) | [`large-cache-experimental`](https://github.com/nyannoying1337/ArcCache/tree/large-cache-experimental/src) |
-| Start here if… | You want the standard workflow | You want larger-limit experiments, DLL scans and Xe3 device tests |
+[**Download Arc Cache preview for Windows x64**](https://github.com/nyannoying1337/ArcCache/releases/tag/arc-cache-unified-libraries-preview-2026.10.15)
+
+There is one application: `ArcCache.exe`. It includes the graphics checks, driver-update detection, overlay and reviewed 8/16 GiB options previously distributed separately. **8/16 GiB remain highly experimental and require their exact supported driver.** Older releases are retained for recovery and source history.
+
+## Game libraries
+
+Arc Cache reads installed-game records for **Steam, Epic, Battle.net, GOG, Ubisoft Connect, EA, Riot, Amazon, Rockstar, Xbox game folders and Legendary/Heroic Epic installs**. Coverage depends on the records available locally; accounts are not queried or signed in. The library filter shows the discovered sources.
+
+Use **Add game…** to select a 64-bit game executable from any launcher or a standalone installation. Manual entries can be removed after their custom setup is restored to default. Discovery is separate from graphics-driver compatibility and anti-cheat safety. Protected Xbox/WindowsApps installations are not unlocked or modified. [Discovery formats, launch behavior and limitations](docs/GAME-LIBRARIES.md).
 
 **Driver support:** reviewed game setups require the exact **Xe2 32.0.101.9034 files**. New Xe2/Xe3 files with one trusted cache-setting candidate can continue from passed graphics tests to an explicit **1 GiB game trial**, with per-game loading checks and rollback. Active built-in and add-in Intel graphics can be selected. Unknown/ambiguous files without matching successful tests stay blocked; Xe3/iGPU gameplay remains unverified. [Follow the guided setup](src/ArcCache.WinUI/docs/GUIDED-GAME-SETUP.md).
 
 > **These are unsigned previews.** Loading tests do not prove effective shader-cache capacity. 8/16 GiB gameplay and large-cache reload remain unverified; a large cache can require roughly its size in contiguous RAM. [Test coverage and compatibility](docs/TESTING.md).
 
-**You are browsing the experimental branch.** Use `main` for the standard source.
-
 ## Get started
 
 A first-run introduction explains setup and recovery. Reopen it from Settings. The game page shows one setup guide and visible cache-size buttons; unavailable sizes include a reason.
 
-1. **Download and extract the entire ZIP.** Open `ArcCache.exe` or `ArcCache.Experimental.exe`. No Python, terminal commands or .NET SDK are needed to run it.
+1. **Download and extract the entire ZIP.** Open `ArcCache.exe`. No Python, terminal commands or .NET SDK are needed to run it.
 2. **Enable “Enable game-specific settings” once.** Manually run the app as administrator for this setting, confirm, then restart Windows. Use the app normally afterward.
-3. **Select a Steam game and launch DX12.** Leave it at the menu so Arc Cache can detect its actual rendering executable.
+3. **Select or add a game and launch DX12.** Leave it at the menu so Arc Cache can detect its actual rendering executable.
 4. **Close the game and prepare its original private copy.** Launch again with the app open for the automatic loading check, then close the game.
-5. **Choose and apply a limit.** Play normally through Steam. Arc Cache can be closed unless you want its overlay.
+5. **Choose and apply a limit.** Play normally through its usual launcher. Arc Cache can be closed unless you want its overlay.
 
 [Full setup guide →](src/ArcCache.WinUI/docs/QUICKSTART.md) · [Private routing explained →](src/ArcCache.WinUI/docs/PRIVATE-DRIVERS.md)
 
 ## What the app handles
 
 - **Per-game copies:** your installed driver remains original; only the selected game's private copy is patched.
-- **Steam library:** installed-game discovery, local artwork and automatic DX12 executable detection.
+- **Game libraries:** local launcher discovery, manual executable selection, library filtering and automatic DX12 executable detection.
 - **Verification and recovery:** exact driver hashes, checked patch bytes, file/ACL validation and receipt-based rollback.
 - **Troubleshooting:** optional local diagnostic logs and an external overlay for shared cache size; no game injection.
 - **Optional SCSKiller bridge:** use your existing CLI/account. Compilation currently uses the stock driver, not the game's private cap.
@@ -96,16 +97,16 @@ dotnet publish src/ArcCache.WinUI/App/ArcCache.WinUI.csproj -c Release -p:Platfo
 | Source | What it contains |
 | --- | --- |
 | [WinUI app](src/ArcCache.WinUI/App) | XAML views, controls and game workflow |
-| [Core](src/ArcCache.WinUI/Core) | Steam discovery, state, diagnostics and CLI bridge |
+| [Core](src/ArcCache.WinUI/Core) | Launcher discovery, state, diagnostics and CLI bridge |
 | [Safety worker](src/ArcCache.WinUI/Worker) | Validated requests and read-only overlay |
 | [Patch engine](src/ArcCache.Engine) | Qualified patches, private sets, ACL handling and rollback |
 | [Tests](src/ArcCache.WinUI/Tests) | Core, worker and bridge checks; adjacent folders contain safety/native checks |
 
-[Build requirements and test commands →](docs/DEVELOPMENT.md) · [Experimental research source →](https://github.com/nyannoying1337/ArcCache/tree/large-cache-experimental/research/LargeCache)
+[Build requirements and test commands →](docs/DEVELOPMENT.md) · [Experimental research source →](https://github.com/nyannoying1337/ArcCache/tree/main/research/LargeCache)
 
 ## Xe3 and new driver DLLs
 
-The experimental build can **inspect the DLL itself** and distinguish a structural candidate from a reviewed patch definition. Its Try a compatibility check page offers original/1/2/4 GiB isolated tests for the reviewed Xe3 image. The development machine does not need an Xe3 GPU; the tester's machine does.
+The preview can **inspect the DLL itself** and distinguish a structural candidate from a reviewed patch definition. Its Try a compatibility check page offers original/1/2/4 GiB isolated tests for the reviewed Xe3 image. The development machine does not need an Xe3 GPU; the tester's machine does.
 
 A matching pattern alone does not qualify an unknown driver. Device tests leave games and the installed driver untouched, and do not establish per-game support or effective capacity. [Testing details](docs/TESTING.md).
 
@@ -131,7 +132,7 @@ No. Once a setup is applied, Windows loads its private files on later game launc
 <details>
 <summary><strong>What happens after a game or driver update?</strong></summary>
 
-A changed executable must be detected again. The experimental app offers read-only active-driver update review; it does not automatically qualify new versions. Unsupported packages remain blocked. Use the recorded recovery workflow to return affected games to the system driver.
+A changed executable must be detected again. The preview offers read-only active-driver update review; it does not automatically qualify new versions. Unsupported packages remain blocked. Use the recorded recovery workflow to return affected games to the system driver.
 
 </details>
 

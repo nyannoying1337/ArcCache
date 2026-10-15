@@ -2,7 +2,7 @@
 using System.Text.Json;
 
 namespace ArcCache.Core;
-public sealed record WorkerRequest(string Action, string? Executable=null, string? ReceiptPath=null, string? DriverFolder=null, int MiB=512, bool Confirmed=false, string? SourceReceipt=null, uint SteamAppId=0, string? InstallDirectory=null, bool RiskConfirmed=false, bool ReadOnly=false,string? DriverFile=null,string? AdapterId=null);
+public sealed record WorkerRequest(string Action, string? Executable=null, string? ReceiptPath=null, string? DriverFolder=null, int MiB=512, bool Confirmed=false, string? SourceReceipt=null, uint SteamAppId=0, string? InstallDirectory=null, bool RiskConfirmed=false, bool ReadOnly=false,string? DriverFile=null,string? AdapterId=null,string? LibrarySource=null,string? ExternalId=null,string? SelectedExecutable=null);
 public sealed record WorkerReply(bool Ok, string Message, JsonElement Data);
 public sealed class SafetyClient(string workerPath) {
     public Action<string,object>? Diagnostic {get;set;}
@@ -37,6 +37,8 @@ public sealed class AppStore {
     public string LogPath {get;}
     public AppStore(string? root=null){Root=root??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap");Directory.CreateDirectory(GamesDirectory);Directory.CreateDirectory(Path.Combine(Root,"logs"));LogPath=Path.Combine(Root,"logs",DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff")+"-"+Environment.ProcessId+"-"+Guid.NewGuid().ToString("N")+"-winui.log");}
     public string Receipt(uint appId)=>Path.Combine(GamesDirectory,"steam-"+appId+".json");
+    public string Receipt(SteamGame game)=>Receipt(game.Key);
+    public string Receipt(string key){if(!ArcCap.GameIdentity.ValidKey(key))throw new InvalidDataException("Invalid game identity.");return Path.Combine(GamesDirectory,key+".json");}
     public ReceiptState? Read(uint appId) => File.Exists(Receipt(appId))?JsonSerializer.Deserialize<ReceiptState>(File.ReadAllText(Receipt(appId)),new JsonSerializerOptions{PropertyNameCaseInsensitive=true}):null;
     public void Log(string message){try{File.AppendAllText(LogPath,DateTime.Now.ToString("HH:mm:ss ")+message+Environment.NewLine);}catch(IOException){}catch(UnauthorizedAccessException){}}
 }

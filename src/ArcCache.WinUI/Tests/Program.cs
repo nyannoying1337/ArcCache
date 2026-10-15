@@ -5,6 +5,7 @@ int passed=0;
 void Check(bool yes,string message){if(!yes)throw new Exception(message);}
 void Test(string name,Action body){body();passed++;Console.WriteLine("PASS "+name);}
 void Reject(Action body){try{body();}catch(InvalidDataException){return;}throw new Exception("Expected rejection.");}
+GameLibraryTests.Run(Test,Check);
 Test("Introduction is shown for a new profile, stays dismissed across updates, and recovers invalid preferences",()=>{
  string root=Path.Combine(Path.GetTempPath(),"ArcWelcomeTest-"+Guid.NewGuid());
  try{var intro=new Introduction(root);Check(intro.ShouldShow,"New profile skipped introduction.");intro.Dismiss();Check(!new Introduction(root).ShouldShow,"Dismissal did not persist.");File.WriteAllText(Path.Combine(root,"introduction-version.txt"),"invalid");Check(new Introduction(root).ShouldShow,"Invalid preference hid introduction.");Check(Introduction.Screens.Length==5,"Introduction screen count changed unexpectedly.");}finally{if(Directory.Exists(root))Directory.Delete(root,true);}
@@ -72,7 +73,7 @@ Test("Installed wide cap is distinct from unmeasured runtime behavior",()=>{
     var state=new GameSetupState(true,true,true,true,receipt,null);
     var ui=SetupPresentation.From(state,true);
     Check(ui.Installed.StartsWith("4 GiB set")&&ui.Title=="Ready to play"&&!ui.WaitingForControl,"Applied patch presented as missing or waiting for original control.");
-    Check(ui.Next.Contains("Play through Steam")&&!ui.WaitingForControl,"Installed patch still shown as needing setup.");
+    Check(ui.Next.Contains("Play through your launcher")&&!ui.WaitingForControl,"Installed patch still shown as needing setup.");
     Check(SetupPresentation.From(state,false).Installed.StartsWith("4 GiB set"),"Stale executable erased verified installed limit.");
     Check(SetupPresentation.From(state with{ContentsValid=false,Error="Hash mismatch"},true).Title=="Fix this setup","Invalid disk files shown as applied.");
 });
@@ -161,6 +162,19 @@ Test("Steam multiple libraries, install flags, duplicate IDs and traversal",()=>
 });
 if(args.Length>0) {
     var safety=new SafetyClient(Path.GetFullPath(args[0]));
+    Test("Non-Steam safety remains unknown without querying Steam categories",()=>{
+        string root=Path.Combine(Path.GetTempPath(),"ArcOfflineSafety-"+Guid.NewGuid());Directory.CreateDirectory(root);
+        try{var result=safety.RunAsync(new("Safety",InstallDirectory:root,LibrarySource:"Epic",ExternalId:"fixture")).GetAwaiter().GetResult();Check(result.Ok&&!result.Data.GetProperty("Allowed").GetBoolean()&&result.Data.GetProperty("SteamStatus").GetString()!.Contains("No Steam"),"Non-Steam game borrowed Steam safety metadata.");}finally{Directory.Delete(root,true);}
+    });
+    Test("Non-Steam discovery refuses identity spoofing and read-only scans do not pin a profile",()=>{
+        string root=Path.Combine(Path.GetTempPath(),"ArcExternalScan-"+Guid.NewGuid());Directory.CreateDirectory(root);
+        try{
+            var denied=safety.RunAsync(new("DiscoverGame",SteamAppId:292030,InstallDirectory:root,LibrarySource:"Epic",ExternalId:"fixture",ReadOnly:true)).GetAwaiter().GetResult();Check(!denied.Ok&&denied.Message.Contains("identity"),"Non-Steam game impersonated a Steam identity.");
+            string key=ArcCap.GameIdentity.Key(0,"Epic","fixture",root),profile=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap","profiles",key+".json");
+            var scan=safety.RunAsync(new("DiscoverGame",InstallDirectory:root,LibrarySource:"Epic",ExternalId:"fixture",ReadOnly:true)).GetAwaiter().GetResult();Check(scan.Ok&&!scan.Data.GetProperty("Validated").GetBoolean()&&!File.Exists(profile),"Read-only discovery trusted a stopped game or wrote a profile.");
+        }finally{Directory.Delete(root,true);}
+    });
+
     Test("Xe3 device experiments require consent and risk acknowledgment even for read-only requests",()=>{
         foreach(string action in new[]{"CreateXe3Experiment","RunXe3Experiment"}){
             var readOnly=safety.RunAsync(new(action,Confirmed:true,RiskConfirmed:true,ReadOnly:true)).GetAwaiter().GetResult();Check(!readOnly.Ok&&readOnly.Message.Contains("Read-only"),"Read-only request permitted a device experiment.");

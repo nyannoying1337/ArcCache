@@ -14,7 +14,7 @@ From the repository root:
 dotnet publish src/ArcCache.WinUI/App/ArcCache.WinUI.csproj -c Release -p:Platform=x64 -o out/ArcCache
 ```
 
-The app build compiles the safety worker from `src/ArcCache.Engine` and `src/ArcCache.WinUI/Worker`. Standard produces `ArcCache.exe`; the experimental branch produces `ArcCache.Experimental.exe`. Keep the entire output directory, not only the EXE.
+The app build compiles the safety worker from `src/ArcCache.Engine` and `src/ArcCache.WinUI/Worker`. The unified preview produces `ArcCache.exe`. Keep the entire output directory, not only the EXE.
 
 ## Run checks
 
@@ -32,12 +32,12 @@ Engine tests and native research optionally require exact qualified original DLL
 | Folder | Purpose |
 | --- | --- |
 | `src/ArcCache.WinUI/App` | WinUI 3 XAML, game workflow and settings |
-| `src/ArcCache.WinUI/Core` | Steam discovery, presentation, diagnostics and optional CLI bridge |
+| `src/ArcCache.WinUI/Core` | Launcher discovery, presentation, diagnostics and optional CLI bridge |
 | `src/ArcCache.WinUI/Worker` | Compiled safety worker and external read-only overlay |
 | `src/ArcCache.Engine` | Pinned patches, file/ACL validation, private sets and rollback |
 | `src/ArcCache.WinUI/Tests`, `MonitorTests`, `NativeTests` | Core, worker, safety and native checks |
 
-The experimental branch additionally has `research/LargeCache` and its reviewed larger-patch sources. This is research evidence, not universal GPU support.
+The repository also has `research/LargeCache` and its reviewed larger-patch sources. This is research evidence, not universal GPU support.
 
 ## Optional CLI packaging
 
@@ -47,7 +47,7 @@ The experimental branch additionally has `research/LargeCache` and its reviewed 
 
 User guides are under `src/ArcCache.WinUI/docs`. README artwork is an original SVG in `docs/assets`; no proprietary DLLs, personal receipts or diagnostic logs belong in Git. Preserve GPL/source attribution and runtime redistribution notices when packaging binaries.
 
-## Xe3 probe (experimental branch)
+## Optional Xe3 probe
 
 Build `research/LargeCache/build-xe3-probe.cmd` before publishing to include `ArcCache.Xe3Probe.exe`. MSVC is required for this optional native component. The app itself still builds without it; preparing a device-test bundle then reports the missing component. See [test coverage](TESTING.md).
 

@@ -37,7 +37,7 @@ public partial class MainWindow : Window {
     readonly DispatcherTimer discoveryTimer=new(){Interval=TimeSpan.FromSeconds(4)};
     string discoveryMessage="";
     bool preview;
-    readonly Dictionary<uint,int> desiredLimits=new();
+    readonly Dictionary<string,int> desiredLimits=new();
     bool updatingChoice, synchronizingSelection, backgroundCheck;
     string lastBackgroundError="", displayedArtwork="";
     int foregroundRuns, backgroundPolls, previewWatchSeconds;
@@ -50,7 +50,7 @@ public partial class MainWindow : Window {
         diagnostics.Write("session-start",new{Version=typeof(MainWindow).Assembly.GetName().Version?.ToString(),OS=Environment.OSVersion.ToString(),Runtime=Environment.Version.ToString(),Variant=typeof(MainWindow).Assembly.GetName().Name});
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1320,940));Nav.SelectedItem=LibraryNav;
         AppWindow.Closing+=(_,e)=>{if(busy)e.Cancel=true;else{closing=true;graphicsStatsTimer.Stop();discoveryTimer.Stop();driverWatchTimer.Stop();StopCacheMonitor();}};
-        Root.Loaded+=async (_,_)=>{await Run("Reading your Steam library…",LoadLibrary);if(!preview){driverWatchTimer.Start();if(new Introduction(store.Root).ShouldShow)ShowIntroduction();}};
+        Root.Loaded+=async (_,_)=>{await Run("Reading your game libraries…",LoadLibrary);if(!preview){driverWatchTimer.Start();if(new Introduction(store.Root).ShouldShow)ShowIntroduction();}};
         driverWatchTimer.Tick+=async (_,_)=>await CheckDriverChanged();
         Activated+=async (_,e)=>{if(e.WindowActivationState!=WindowActivationState.Deactivated)await CheckDriverChanged();};
         discoveryTimer.Tick+=async (_,_)=>await PollGame();
@@ -65,12 +65,14 @@ public partial class MainWindow : Window {
             try {
                 await Task.Delay(1500);while(busy)await Task.Delay(200);
                 if(appId!=0){selected=games.FirstOrDefault(g=>g.AppId==appId);await Run("Showing selected game for read-only preview…",ShowGame);Filter();}
+                int sourceAt=Array.IndexOf(Environment.GetCommandLineArgs(),"--preview-source");if(sourceAt>=0&&sourceAt+1<Environment.GetCommandLineArgs().Length){string source=Environment.GetCommandLineArgs()[sourceAt+1];await Run("Showing a library for read-only preview…",async()=>{SourceFilter.SelectedItem=source;selected=games.FirstOrDefault(g=>g.Source==source);Filter();await ShowGame();});}
                 await Task.Delay(700);while(busy)await Task.Delay(200);Root.Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,32,32,32));Root.UpdateLayout();
                 if(simulateDriverUpdate){ShowDriverChange(driverIdentity+"-preview-fixture");File.WriteAllText(path+".driver-checks.json",JsonSerializer.Serialize(new{ApplyEnabled=ApplyButton.IsEnabled,ApplyLabel=ApplyButton.Content?.ToString(),LaunchEnabled=LaunchButton.IsEnabled,RecoveryEnabled=RestoreButton.IsEnabled,NoticeVisible=DriverUpdateNotice.IsOpen}));}
                 if(Environment.GetCommandLineArgs().Contains("--preview-driver")){Nav.SelectedItem=Nav.MenuItems.OfType<NavigationViewItem>().First(i=>Equals(i.Tag,"Driver"));var identity=await Engine(new("DriverIdentity",ReadOnly:true));string? folder=identity.Data.GetProperty("DriverFolder").GetString();if(folder!=null)await ScanExperiment(Path.Combine(folder,"igd12um64xe3.dll"));await Task.Delay(300);Root.UpdateLayout();File.WriteAllText(path+".xe3-checks.json",JsonSerializer.Serialize(new{Reviewed=experimentReviewed,PrepareEnabled=Xe3Prepare.IsEnabled,RunEnabled=Xe3Run.IsEnabled,Busy=busy}));}
                 if(Environment.GetCommandLineArgs().Contains("--preview-trial")){Nav.SelectedItem=Nav.MenuItems.OfType<NavigationViewItem>().First(i=>Equals(i.Tag,"Driver"));await CheckTrialSupport();await Task.Delay(300);Root.UpdateLayout();File.WriteAllText(path+".trial-checks.json",JsonSerializer.Serialize(new{Eligible=trialEligible,Enabled=TrialButton.IsEnabled,Summary=TrialSummary.Text,Progress=TrialProgress.Value,Ram=GraphicsRam.Text,Cache=GraphicsCache.Text,ReadOnly=preview}));}
                 if(Environment.GetCommandLineArgs().Contains("--preview-settings")){Nav.SelectedItem=Nav.FooterMenuItems.OfType<NavigationViewItem>().First(i=>Equals(i.Tag,"Settings"));Root.UpdateLayout();}
                 if(Environment.GetCommandLineArgs().Contains("--preview-welcome")){ShowIntroduction();if(Environment.GetCommandLineArgs().Contains("--preview-last")){introductionIndex=Introduction.Screens.Length-1;RenderIntroduction();}}
+                File.WriteAllText(path+".libraries.json",JsonSerializer.Serialize(new{Count=games.Count,Sources=games.GroupBy(g=>g.Source).ToDictionary(g=>g.Key,g=>g.Count()),UniqueKeys=games.Select(g=>g.Key).Distinct().Count()==games.Count,ReadOnly=preview}));
                 int runsBefore=foregroundRuns,pollsBefore=backgroundPolls;
                 if(previewWatchSeconds>0)await Task.Delay(previewWatchSeconds*1000);
                 if(previewWatchSeconds>0)File.WriteAllText(path+".checks.json",JsonSerializer.Serialize(new{ForegroundRunsBefore=runsBefore,ForegroundRunsAfter=foregroundRuns,BackgroundPolls=backgroundPolls-pollsBefore,NavigationEnabled=Nav.IsEnabled}));
@@ -110,14 +112,15 @@ public partial class MainWindow : Window {
         WorkerReply reply=await safety.RunAsync(request);Log(reply.Message);if(!reply.Ok)throw new InvalidOperationException(reply.Message);return reply;
     }
     async Task LoadLibrary() {
-        uint? previousId=selected?.AppId;var previousGames=games.ToDictionary(g=>g.AppId);
-        LibraryResult result=await Task.Run(()=>SteamLibrary.Discover(steamRoot));games=result.Games.Select(g=>previousGames.TryGetValue(g.AppId,out var old)?g with{Detected=old.Detected,DetectedExecutable=old.DetectedExecutable}:g).ToArray();steamRoot=result.SteamRoot;
-        LibraryCount.Text=$"{games.Count} installed Steam titles · local discovery";
-        LibraryNotice.IsOpen=result.Warnings.Count>0;LibraryNotice.Title="Steam discovery";LibraryNotice.Message=string.Join(Environment.NewLine,result.Warnings.Take(3));
+        string? previousId=selected?.Key;var previousGames=games.ToDictionary(g=>g.Key);
+        LibraryResult result=await Task.Run(()=>GameLibraries.Discover(steamRoot,store.Root));games=result.Games.Select(g=>previousGames.TryGetValue(g.Key,out var old)?g with{Detected=old.Detected,DetectedExecutable=old.DetectedExecutable}:g).ToArray();steamRoot=result.SteamRoot;
+        LibraryCount.Text=$"{games.Count} installed games · local discovery";
+        LibraryNotice.IsOpen=result.Warnings.Count>0;LibraryNotice.Title="Library discovery";LibraryNotice.Message=string.Join(Environment.NewLine,result.Warnings.Take(3));
+        var source=SourceFilter.SelectedItem as string??"All libraries";SourceFilter.ItemsSource=new[]{"All libraries"}.Concat(games.Select(g=>g.Source).Distinct().OrderBy(x=>x)).ToArray();SourceFilter.SelectedItem=SourceFilter.Items.Contains(source)?source:"All libraries";
         Filter();await LoadDriver();
-        GamesList.SelectedItem=games.FirstOrDefault(g=>g.AppId==previousId)??games.FirstOrDefault(g=>g.AppId==292030)??games.FirstOrDefault();selected=GamesList.SelectedItem as SteamGame;await ShowGame();
+        var visible=GamesList.Items.OfType<SteamGame>().ToArray();GamesList.SelectedItem=visible.FirstOrDefault(g=>g.Key==previousId)??visible.FirstOrDefault(g=>g.AppId==292030)??visible.FirstOrDefault();selected=GamesList.SelectedItem as SteamGame;await ShowGame();
     }
-    void Filter(){synchronizingSelection=true;try{uint? id=selected?.AppId;GamesList.ItemsSource=games.Where(g=>g.Name.Contains(Search.Text??"",StringComparison.OrdinalIgnoreCase)).ToArray();if(id!=null)GamesList.SelectedItem=games.FirstOrDefault(g=>g.AppId==id&&g.Name.Contains(Search.Text??"",StringComparison.OrdinalIgnoreCase));}finally{synchronizingSelection=false;}}
+    void Filter(){synchronizingSelection=true;try{string? id=selected?.Key;GamesList.ItemsSource=games.Where(g=>g.Name.Contains(Search.Text??"",StringComparison.OrdinalIgnoreCase)&&(SourceFilter.SelectedItem is not string filter||filter=="All libraries"||g.Source==filter)).ToArray();if(id!=null)GamesList.SelectedItem=games.FirstOrDefault(g=>g.Key==id&&g.Name.Contains(Search.Text??"",StringComparison.OrdinalIgnoreCase)&&(SourceFilter.SelectedItem is not string filter||filter=="All libraries"||g.Source==filter));LibraryCount.Text=$"{GamesList.Items.Count} of {games.Count} installed games · local discovery";}finally{synchronizingSelection=false;}}
     void FillGraphics(JsonElement data) {
         fillingGraphics=true;try{
             var choices=data.GetProperty("Adapters").Deserialize<GraphicsChipChoice[]>()??[];GraphicsChoice.ItemsSource=choices;
@@ -169,15 +172,15 @@ public partial class MainWindow : Window {
     }
     async Task PollGame() {
         if(busy||backgroundCheck||selected==null)return;
-        var game=selected;uint id=game.AppId;backgroundCheck=true;backgroundPolls++;
+        var game=selected;string id=game.Key;backgroundCheck=true;backgroundPolls++;
         try {
             if(!game.Supported) {
-                if(await DiscoverSelected(true)&&selected?.AppId==id&&!busy)await ShowGame();
+                if(await DiscoverSelected(true)&&selected?.Key==id&&!busy)await ShowGame();
             }else if(NeedsControlObservation()) {
                 // Polling never enters global busy mode, clears artwork, or rechecks Steam safety.
                 var result=await safety.RunAsync(new("VerifyControl",ReceiptPath:store.Receipt(id),ReadOnly:preview));
                 if(!result.Ok)throw new InvalidOperationException(result.Message);
-                if(selected?.AppId!=id||busy)return;
+                if(selected?.Key!=id||busy)return;
                 if(result.Data.GetProperty("Verified").GetBoolean()) {
                     if(!await ReadSetup(game))return;
                     RuntimeStatus.Text="The first setup loaded. Close the game, then choose your cache size.";
@@ -192,10 +195,10 @@ public partial class MainWindow : Window {
     async Task<bool> ReadSetup(SteamGame game) {
         GameSetupState? state=null;
         if(game.SupportedExecutable!=null)try {
-            var reply=await safety.RunAsync(new("GameState",game.SupportedExecutable,store.Receipt(game.AppId)));
+            var reply=await safety.RunAsync(new("GameState",game.SupportedExecutable,store.Receipt(game)));
             if(!reply.Ok)throw new InvalidOperationException(reply.Message);state=GameSetupState.FromReply(reply);
         }catch(Exception e){state=new(false,false,false,false,null,e.Message);}
-        if(selected?.AppId!=game.AppId)return false;
+        if(selected?.Key!=game.Key)return false;
         setupState=state;selectedReceipt=state?.Receipt;recordValid=state?.RecordValid==true;receiptValid=state?.ContentsValid==true;
         return true;
     }
@@ -206,36 +209,37 @@ public partial class MainWindow : Window {
         GameNotice.Title=presentation.Title;GameNotice.Message=presentation.Next;
         GameNotice.Severity=setupState?.Error!=null||setupState?.CompatibilityRepairRequired==true?InfoBarSeverity.Warning:InfoBarSeverity.Informational;
         GameNotice.IsOpen=setupState?.Error!=null||setupState?.CompatibilityRepairRequired==true;
-        gameGuide=GameGuide.From(setupState,selected.Supported,routingReady,GameDriverReady,successfulTrial!=null);GuideTitle.Text=gameGuide.Title;GuideBody.Text=gameGuide.Body;GuideButton.Content=gameGuide.Button;
+        gameGuide=GameGuide.From(setupState,selected.Supported,routingReady,GameDriverReady,successfulTrial!=null);GuideTitle.Text=gameGuide.Title;GuideBody.Text=gameGuide.Body;GuideButton.Content=gameGuide.Action=="Launch"?GameLaunch.For(selected).Caption:gameGuide.Button;
+        GameSource.Text=selected.Source.ToUpperInvariant()+" LIBRARY";
         bool ready=setupState?.Configured==true&&selectedReceipt?.MiB>512&&GameDriverReady&&routingReady&&setupState?.Error==null;
         GuideCard.Visibility=ready?Visibility.Collapsed:Visibility.Visible;
         SetupStage.Text=gameGuide.Action switch{"Graphics"=>"Before setup · check graphics","Settings"=>"Before setup · enable game-specific settings","Prepare"=>"2 of 4 · prepare the game copy","Apply"=>"4 of 4 · choose a cache size","Launch" when NeedsControlObservation()=>"3 of 4 · waiting for the game to load its copy","Launch"=>"1 of 4 · waiting for you to start the game",_=>"Setup needs attention"};
         GuideButton.Visibility=gameGuide.Action=="Apply"?Visibility.Collapsed:Visibility.Visible;
         updatingChoice=true;
-        int desired=desiredLimits.GetValueOrDefault(selected.AppId,selectedReceipt?.MiB is >512?selectedReceipt.MiB:1024);if(TrialMode&&desired>1024){desired=1024;desiredLimits[selected.AppId]=1024;}foreach(var item in CapChoice.Items.OfType<ComboBoxItem>())item.IsEnabled=(!TrialMode||int.Parse(item.Tag.ToString()!)<=1024);
+        int desired=desiredLimits.GetValueOrDefault(selected.Key,selectedReceipt?.MiB is >512?selectedReceipt.MiB:1024);if(TrialMode&&desired>1024){desired=1024;desiredLimits[selected.Key]=1024;}foreach(var item in CapChoice.Items.OfType<ComboBoxItem>())item.IsEnabled=(!TrialMode||int.Parse(item.Tag.ToString()!)<=1024);
         CapChoice.SelectedItem=CapChoice.Items.OfType<ComboBoxItem>().FirstOrDefault(i=>int.Parse(i.Tag.ToString()!)==desired);
         updatingChoice=false;UpdateButtons();
     }
     async Task ShowGame() {
-        discoveryTimer.Stop();var game=selected;if(game==null){GameTitle.Text="Choose a game";GameStatus.Text="Select an installed Steam title.";UpdateButtons();return;}
-        await DiscoverSelected();if(selected?.AppId!=game.AppId)return;game=selected;
+        discoveryTimer.Stop();var game=selected;Details.Visibility=game==null?Visibility.Collapsed:Visibility.Visible;if(game==null){GameTitle.Text="Choose a game";GameStatus.Text="Select an installed game or add one manually.";UpdateButtons();return;}
+        await DiscoverSelected();if(selected?.Key!=game.Key)return;game=selected;
         GameTitle.Text=game.Name;
         string artKey=string.Join("|",game.ArtworkSources);
         if(displayedArtwork!=artKey){displayedArtwork=artKey;GamePlaceholder.Visibility=Visibility.Visible;GameArtwork.Source=ArtworkImages.Get(game.ArtworkSources,240);}
-        GameDetails.Text=$"Steam app: {game.AppId}\nInstall folder: {game.InstallDirectory}\nRecovery record: {store.Receipt(game.AppId)}";
+        GameDetails.Text=$"Library: {game.Source} · ID: {game.ExternalId??game.AppId.ToString()}\nInstall folder: {game.InstallDirectory}\nRecovery record: {store.Receipt(game)}";
         RuntimeStatus.Text="Game setup has not been checked yet.";
         safetyAllowed=false;
         try {
             var assessment=(await safety.RunAsync(new("Safety",SteamAppId:game.AppId,InstallDirectory:game.InstallDirectory))).Data;
-            if(selected?.AppId!=game.AppId)return;
+            if(selected?.Key!=game.Key)return;
             var notice=SafetyPresentation.From(assessment);safetyAllowed=!notice.Warn;
             SafetyPanel.Visibility=notice.Warn?Visibility.Visible:Visibility.Collapsed;
             SafetyNotice.IsOpen=notice.Warn;SafetyNotice.Title=notice.Title;SafetyNotice.Message=notice.Message;SafetyNotice.Severity=InfoBarSeverity.Warning;
             SafetyDetails.Text=assessment.GetProperty("Message").GetString()+"\n"+assessment.GetProperty("Multiplayer").GetString()+"\n"+assessment.GetProperty("SteamStatus").GetString();
             Log("Safety: "+SafetyDetails.Text);
-        }catch(Exception e){if(selected?.AppId!=game.AppId)return;SafetyPanel.Visibility=Visibility.Visible;SafetyNotice.IsOpen=true;SafetyNotice.Title="Game safety could not be confirmed";SafetyNotice.Message="A modified driver may cause launch failures or account penalties. Continue only if you accept that risk.";SafetyNotice.Severity=InfoBarSeverity.Warning;SafetyDetails.Text=e.Message;Log("Safety check: "+e.Message);}
+        }catch(Exception e){if(selected?.Key!=game.Key)return;SafetyPanel.Visibility=Visibility.Visible;SafetyNotice.IsOpen=true;SafetyNotice.Title="Game safety could not be confirmed";SafetyNotice.Message="A modified driver may cause launch failures or account penalties. Continue only if you accept that risk.";SafetyNotice.Severity=InfoBarSeverity.Warning;SafetyDetails.Text=e.Message;Log("Safety check: "+e.Message);}
         if(!await ReadSetup(game))return;
-        if(setupState?.Configured==true&&selectedReceipt?.MiB>512)desiredLimits[game.AppId]=selectedReceipt.MiB;
+        if(setupState?.Configured==true&&selectedReceipt?.MiB>512)desiredLimits[game.Key]=selectedReceipt.MiB;
         RenderSetup();
         if((!preview||previewWatchSeconds>0)&&(!game.Supported||NeedsControlObservation()))discoveryTimer.Start();
     }
@@ -245,23 +249,24 @@ public partial class MainWindow : Window {
     async Task<bool> DiscoverSelected(bool quiet=false) {
         if(selected==null)return false;var game=selected;
         try {
-            var request=new WorkerRequest("DiscoverGame",ReceiptPath:store.Receipt(game.AppId),SourceReceipt:successfulTrial,SteamAppId:game.AppId,InstallDirectory:game.InstallDirectory,ReadOnly:preview);
+            var request=new WorkerRequest("DiscoverGame",ReceiptPath:store.Receipt(game),SourceReceipt:successfulTrial,SteamAppId:game.AppId,InstallDirectory:game.InstallDirectory,ReadOnly:preview,LibrarySource:game.Source,ExternalId:game.ExternalId,SelectedExecutable:game.ManualExecutable);
             var reply=quiet?await safety.RunAsync(request):await Engine(request);if(!reply.Ok)throw new InvalidOperationException(reply.Message);
-            if(selected?.AppId!=game.AppId)return false;
+            if(selected?.Key!=game.Key)return false;
             bool found=reply.Data.GetProperty("Validated").GetBoolean();string? exe=reply.Data.GetProperty("Executable").GetString();
             discoveryMessage=reply.Data.GetProperty("Message").GetString()??"";bool changed=game.Detected!=found||game.DetectedExecutable!=exe;
-            var updated=game with{Detected=found,DetectedExecutable=exe};games=games.Select(g=>g.AppId==game.AppId?updated:g).ToArray();selected=updated;
+            var updated=game with{Detected=found,DetectedExecutable=exe};games=games.Select(g=>g.Key==game.Key?updated:g).ToArray();selected=updated;
             if(changed)Filter();
             if(found)discoveryTimer.Stop();return found;
-        }catch(Exception e){if(quiet)throw;discoveryMessage="Automatic detection unavailable: "+e.Message;Log(discoveryMessage);if(selected?.AppId==game.AppId)selected=game with{Detected=false};return false;}
+        }catch(Exception e){if(quiet)throw;discoveryMessage="Automatic detection unavailable: "+e.Message;Log(discoveryMessage);if(selected?.Key==game.Key)selected=game with{Detected=false};return false;}
     }
     void CapChanged(object sender,SelectionChangedEventArgs e) {
         if(updatingChoice||selected==null||CapChoice.SelectedItem is not ComboBoxItem item)return;
-        desiredLimits[selected.AppId]=int.Parse(item.Tag.ToString()!);UpdateButtons();
+        desiredLimits[selected.Key]=int.Parse(item.Tag.ToString()!);UpdateButtons();
     }
     void UpdateButtons() {
         TrialButton.IsEnabled=!busy&&trialEligible;TrialFile.IsEnabled=!busy;UseTrialButton.IsEnabled=!busy&&successfulTrial!=null;GuideButton.IsEnabled=!busy&&selected!=null;
         if(ApplyButton==null)return;
+        if(selected!=null){LaunchButton.Content=GameLaunch.For(selected).Caption;RemoveManualButton.Visibility=selected.Source=="Manual"?Visibility.Visible:Visibility.Collapsed;}
         SetupBusy.IsActive=busy;SetupBusy.Visibility=busy?Visibility.Visible:Visibility.Collapsed;
         Xe3Prepare.IsEnabled=!busy&&experimentReviewed;Xe3Run.IsEnabled=!busy&&experimentReceipt!=null;Xe3Folder.IsEnabled=!busy&&experimentReceipt!=null;
         bool supported=selected?.Supported==true;bool configured=setupState?.Configured==true;
@@ -274,18 +279,18 @@ public partial class MainWindow : Window {
 
         bool same=configured&&CapChoice.SelectedItem is ComboBoxItem choice&&int.Parse(choice.Tag.ToString()!)==selectedReceipt?.MiB;
         if(same&&!NeedsControlObservation()){ApplyButton.IsEnabled=false;ApplyButton.Content="This size is already set";}
-        if(!driverOriginal&&supported)ApplyButton.Content="Check graphics support first";
-        if(selected!=null)SafetyPanel.Visibility=driverOriginal&&!safetyAllowed?Visibility.Visible:Visibility.Collapsed;
+        if(!GameDriverReady&&supported)ApplyButton.Content="Check graphics support first";
+        if(selected!=null)SafetyPanel.Visibility=!safetyAllowed?Visibility.Visible:Visibility.Collapsed;
         foreach(var button in SizeButtons.Children.OfType<ToggleButton>()){
             var option=CapChoice.Items.OfType<ComboBoxItem>().First(i=>Equals(i.Tag?.ToString(),button.Tag?.ToString()));
             button.IsEnabled=CapChoice.IsEnabled&&option.IsEnabled;button.IsChecked=Equals(CapChoice.SelectedItem,option);
-            ToolTipService.SetToolTip(button,option.IsEnabled?"Choose "+button.Content:TrialMode?"This driver currently supports a 1 GiB game trial.":"This size needs the large-cache experimental edition and its supported driver.");
+            ToolTipService.SetToolTip(button,option.IsEnabled?"Choose "+button.Content:TrialMode?"This driver currently supports a 1 GiB game trial.":"This size is unavailable for the selected driver.");
         }
-        LimitAvailability.Text=TrialMode?"This driver supports Default and 1 GiB here. Larger sizes are unavailable for this driver.":"8 and 16 GiB are highly experimental and can greatly increase RAM use while loading.";
-        if(configured&&!same&&!NeedsControlObservation()&&CapChoice.SelectedItem is ComboBoxItem cap)ApplyButton.Content="Apply "+SetupPresentation.Limit(int.Parse(cap.Tag.ToString()!));
-        ScsStatusButton.IsEnabled=!busy&&selected!=null&&scs?.CliPath!=null;
+        LimitAvailability.Text=!GameDriverReady?"Check support on Graphics before choosing a size.":!supported?"Start this game in DirectX 12 so Arc Cache can find its files.":TrialMode?"This driver supports Default and 1 GiB here. Larger sizes are unavailable for this driver.":"8 and 16 GiB are highly experimental and can greatly increase RAM use while loading.";
+        if(configured&&!same&&GameDriverReady&&routingReady&&!NeedsControlObservation()&&CapChoice.SelectedItem is ComboBoxItem cap)ApplyButton.Content="Apply "+SetupPresentation.Limit(int.Parse(cap.Tag.ToString()!));
+        ScsStatusButton.IsEnabled=!busy&&selected!=null&&scs?.CliPath!=null&&selected?.Source=="Steam";
         ScsCompileButton.IsEnabled=ScsStatusButton.IsEnabled&&!(configured&&selectedReceipt?.MiB>512);
-        ScsSummary.Text=configured&&selectedReceipt?.MiB>512
+        ScsSummary.Text=selected?.Source!="Steam"?"SCSKiller integration currently supports Steam games only.":configured&&selectedReceipt?.MiB>512
             ? $"SCSKiller cannot use this game’s {SetupPresentation.Limit(selectedReceipt.MiB)} setting yet. Shader preparation is paused here so it does not use a different size. Your game setup is unchanged."
             : "SCSKiller prepares shaders with the normal driver and its default size. Community downloads need your existing SCSKiller account and settings.";
     }
@@ -323,9 +328,9 @@ public partial class MainWindow : Window {
     async Task CheckTrialSupport(){TrialLog.Text="";TrialProgress.Visibility=Visibility.Visible;TrialProgress.IsIndeterminate=true;await Run("Checking graphics support…",async()=>{try{await LoadDriver(true);await InspectTrial();await GraphicsStats();}finally{TrialProgress.IsIndeterminate=false;}});}
     void Navigate(NavigationView sender,NavigationViewSelectionChangedEventArgs args){string? tag=(args.SelectedItem as NavigationViewItem)?.Tag as string;if(LibraryPanel==null)return;LibraryPanel.Visibility=tag=="Library"?Visibility.Visible:Visibility.Collapsed;DriverPanel.Visibility=tag=="Driver"?Visibility.Visible:Visibility.Collapsed;ActivityPanel.Visibility=tag=="Activity"?Visibility.Visible:Visibility.Collapsed;SettingsPanel.Visibility=tag=="Settings"?Visibility.Visible:Visibility.Collapsed;if(tag=="Driver"){if(!preview)graphicsStatsTimer.Start();_ = GraphicsStats();}else graphicsStatsTimer.Stop();}
     async void RefreshGame(object sender,RoutedEventArgs e)=>await Run("Refreshing installed setup…",ShowGame);
-    async void RefreshLibrary(object sender,RoutedEventArgs e)=>await Run("Refreshing Steam…",LoadLibrary);
+    async void RefreshLibrary(object sender,RoutedEventArgs e)=>await Run("Refreshing installed games…",LoadLibrary);
     void SearchChanged(AutoSuggestBox sender,AutoSuggestBoxTextChangedEventArgs args){if(!busy)Filter();}
-    async void GameSelected(object sender,SelectionChangedEventArgs e){if(busy||synchronizingSelection)return;var next=GamesList.SelectedItem as SteamGame;if(next?.AppId==selected?.AppId)return;selected=next;await Run("Checking this game's setup…",ShowGame);}
+    async void GameSelected(object sender,SelectionChangedEventArgs e){if(busy||synchronizingSelection)return;var next=GamesList.SelectedItem as SteamGame;if(next?.Key==selected?.Key)return;selected=next;await Run("Checking this game's setup…",ShowGame);}
     async Task ScanExperiment(string path) {
         experimentReviewed=false;experimentDll=path;experimentReceipt=null;
         var reply=await Engine(new("ScanDriverFile",DriverFile:path,ReadOnly:true));var f=reply.Data;
@@ -360,7 +365,7 @@ public partial class MainWindow : Window {
     async void ApplyGame(object sender,RoutedEventArgs e) {
         SteamGame? game=selected;if(busy||game?.Supported!=true)return;
         await Run("Checking safety and confirming this private change…",async()=>{
-        string receipt=store.Receipt(game.AppId);int mib=int.Parse(((ComboBoxItem)CapChoice.SelectedItem).Tag.ToString()!);
+        string receipt=store.Receipt(game);int mib=int.Parse(((ComboBoxItem)CapChoice.SelectedItem).Tag.ToString()!);
         bool configured=setupState?.Configured==true;
         string message=configured?$"Set {game.Name}'s cache size to {SetupPresentation.Limit(mib)}? Close the game first. Only this game's own driver copy will change. Windows and other games keep their normal driver.":$"Set up {game.Name}? Arc Cache will create its own unchanged driver copy. It checks free disk space before starting. Close the game first. If a graphics recording mod prevents setup, disable it yourself; Arc Cache will not remove it. Start the game once so the new copy can be checked before a size change.";
         // Recheck before showing consent; the worker independently repeats this check.
@@ -368,19 +373,19 @@ public partial class MainWindow : Window {
         bool riskRequired=TrialMode||!assessment.Ok||!assessment.Data.GetProperty("Allowed").GetBoolean();
         if(riskRequired)message="This game may have multiplayer or anti-cheat. A modified driver can cause account penalties or stop it from starting.\n\n"+message;
         if(mib>=8192)message+="\n\nLARGE-CACHE RELOAD EXPERIMENT: This is an untested driver reload patch. The game can fail to launch or crash. Large cache files still require large memory buffers. Loading an 8/16 GiB cache may require roughly 8/16 GiB of RAM plus the game. No gameplay or real shader-cache capacity above 4 GiB is verified. Use this experimental app to return to 4 GiB or stock. Stop the game if memory climbs rapidly.";
-        else if(mib>=2048)message+="\n\nExperimental larger limit: Ready or Not reached the menu with 4 GiB on driver 32.0.101.9034 after the helper fix. Cache capacity and eviction behavior remain unmeasured. Keep the recovery receipt.";
+        else if(mib>=2048)message+="\n\nLarger limits can increase disk use and RAM needed while loading. Effective cache capacity and performance improvements remain unmeasured. Use default settings to undo this game setup.";
         if(TrialMode)message+="\n\nThis copy passed the separate graphics check, but is new to this game. It could cause launch problems or crashes. Use single-player/offline play; multiplayer or anti-cheat may reject it or penalise your account. Use default settings to undo it. Only the unchanged copy and 1 GiB are offered for this game trial.";
         if(!await Confirm(riskRequired?"Apply anyway?":configured?"Change this game’s cache size":"Set up this game",message,configured?"Apply":"Set up",requireOriginalTest:configured&&mib>=8192,requireRisk:riskRequired))return;
             if(configured)await Engine(new(TrialMode?"ChangeGameTrial":"Change",ReceiptPath:receipt,MiB:mib,Confirmed:true,RiskConfirmed:riskRequired));
             else await Engine(new(TrialMode?"PrepareGameTrial":"Prepare",game.SupportedExecutable,receipt,MiB:512,Confirmed:true,RiskConfirmed:riskRequired,SourceReceipt:TrialMode?successfulTrial:null));
             await ShowGame();
             GlobalNotice.Severity=InfoBarSeverity.Success;GlobalNotice.Title=configured?"Limit installed":"Original copy prepared";
-            GlobalNotice.Message=configured?$"{SetupPresentation.Limit(mib)} set for {game.Name}. Setup files checked. Start the game to check whether it loaded them. Performance improvements have not been measured.":"Next: play through Steam in DirectX 12 mode for the automatic loading check. Your selected limit is saved.";
+            GlobalNotice.Message=configured?$"{SetupPresentation.Limit(mib)} set for {game.Name}. Setup files checked. Start the game to check whether it loaded them. Performance improvements have not been measured.":"Next: start the game through its launcher in DirectX 12 mode for the automatic loading check. Your selected limit is saved.";
             GlobalNotice.IsOpen=true;
         });
     }
     async void RestoreGame(object sender,RoutedEventArgs e) {
-        if(selected?.SupportedExecutable==null)return;string receipt=store.Receipt(selected.AppId);
+        if(selected?.SupportedExecutable==null)return;string receipt=store.Receipt(selected);
         if(!await Confirm("Use default settings for this game?","Close the game first. Arc Cache will remove only the setup files it created, after checking the saved record. Files that changed or were added will stop removal. Your shader cache and the Windows setting stay as they are.","Use default settings"))return;
         await Run("Removing this game's verified private set…",async()=>{await Engine(new("Remove",ReceiptPath:receipt,Confirmed:true));await ShowGame();});
     }
@@ -408,30 +413,42 @@ public partial class MainWindow : Window {
         });
     }
     async void LaunchGame(object sender,RoutedEventArgs e) {
-        if(selected==null)return;SteamGame game=selected;uint id=game.AppId;
+        if(selected==null)return;SteamGame game=selected;string id=game.Key;
         await CheckDriverChanged();
-        await Run("Checking this game before opening Steam…",async()=>{
+        await Run("Checking this game before launching…",async()=>{
             if(game.SupportedExecutable!=null) {
                 var state=GameSetupState.FromReply(await Engine(new("GameState",game.SupportedExecutable,store.Receipt(id))));
                 if(state.FolderExists) {
                     if(!routingReady)throw new InvalidOperationException("Enable game-specific settings in Settings and restart Windows before launching this private setup. To play with the system driver, use Use default settings first.");
-                    if(!driverOriginal)throw new InvalidOperationException("Driver compatibility needs review. Check support or return this game to the system driver first.");
+                    if(!GameDriverReady)throw new InvalidOperationException("Driver compatibility needs review. Check support or return this game to the system driver first.");
                     if(!game.Supported)throw new InvalidOperationException("Game executable changed. Return its private set to stock before launching for rediscovery.");
                     if(state.CompatibilityRepairRequired)throw new InvalidOperationException("This private setup needs a compatibility update. Use default settings, then prepare a fresh original 512 MiB copy before launching.");
                     if(!state.Configured)throw new InvalidOperationException("Existing private setup is unverified. Import its recovery record or recover it before launching through this app.");
-                    var assessment=(await Engine(new("Safety",SteamAppId:id,InstallDirectory:game.InstallDirectory))).Data;
+                    await Engine(new("ValidateForLaunch",ReceiptPath:store.Receipt(id)));
+                    var assessment=(await Engine(new("Safety",SteamAppId:game.AppId,InstallDirectory:game.InstallDirectory))).Data;
                     if(!assessment.GetProperty("Allowed").GetBoolean()&&!await Confirm("This game may reject custom settings","This game may have multiplayer or anti-cheat. Playing with a modified driver can cause account penalties or launch failures. Use the original driver for online play.","Launch anyway",requireRisk:true))return;
                 }
             }
-            Process.Start(new ProcessStartInfo("steam://rungameid/"+id){UseShellExecute=true});Log("Steam launch requested. Launching is not proof of driver loading.");
+            GameLaunch.Start(GameLaunch.For(game));Log("Launch action requested for "+game.Source+". Launching is not proof of driver loading.");
         });
     }
     async void ImportSetup(object sender,RoutedEventArgs e) {
-        if(selected==null)return;uint id=selected.AppId;
+        if(selected==null)return;string id=selected.Key;
         var picker=new FileOpenPicker();picker.FileTypeFilter.Add(".json");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));var file=await picker.PickSingleFileAsync();if(file==null)return;
         await Run("Verifying an existing recovery receipt…",async()=>{
-            await Engine(new("Import",selected!.SupportedExecutable,store.Receipt(id),Confirmed:true,SourceReceipt:file.Path,SteamAppId:id,InstallDirectory:selected.InstallDirectory));await ShowGame();
+            await Engine(new("Import",selected!.SupportedExecutable,store.Receipt(id),Confirmed:true,SourceReceipt:file.Path,SteamAppId:selected.AppId,InstallDirectory:selected.InstallDirectory,LibrarySource:selected.Source,ExternalId:selected.ExternalId));await ShowGame();
         });
+    }
+    async void SourceChanged(object sender,SelectionChangedEventArgs e){if(SourceFilter==null||GamesList==null||busy)return;Filter();var next=GamesList.SelectedItem as SteamGame??GamesList.Items.OfType<SteamGame>().FirstOrDefault();if(next?.Key==selected?.Key)return;synchronizingSelection=true;try{GamesList.SelectedItem=next;selected=next;}finally{synchronizingSelection=false;}await Run("Showing this library…",ShowGame);}
+    async void AddManualGame(object sender,RoutedEventArgs e){
+        if(busy)return;var picker=new FileOpenPicker();picker.FileTypeFilter.Add(".exe");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));var file=await picker.PickSingleFileAsync();if(file==null)return;
+        await Run("Adding your selected game…",async()=>{var added=new ManualGameStore(store.Root).Add(file.Path);await LoadLibrary();SourceFilter.SelectedItem="All libraries";Filter();GamesList.SelectedItem=games.First(g=>g.Key==added.Key);selected=GamesList.SelectedItem as SteamGame;await ShowGame();});
+    }
+    async void RemoveManualGame(object sender,RoutedEventArgs e){
+        if(busy||selected?.Source!="Manual")return;var game=selected;
+        if(setupState?.FolderExists==true||File.Exists((game.ManualExecutable??"")+".local")||Directory.Exists((game.ManualExecutable??"")+".local")){GlobalNotice.Title="Use default settings first";GlobalNotice.Message="Remove this game's custom setup before removing it from the library.";GlobalNotice.IsOpen=true;return;}
+        if(!await Confirm("Remove this library entry?","The game and its shader caches stay on disk. Only the manual library entry is removed.","Remove entry"))return;
+        await Run("Removing the manual entry…",async()=>{new ManualGameStore(store.Root).Remove(game.Key);await LoadLibrary();});
     }
     async void ChooseSteamFolder(object sender,RoutedEventArgs e) {
         var picker=new FolderPicker();picker.FileTypeFilter.Add("*");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));var folder=await picker.PickSingleFolderAsync();if(folder==null)return;steamRoot=folder.Path;
@@ -453,7 +470,8 @@ public partial class MainWindow : Window {
     async void ScsCompile(object sender,RoutedEventArgs e)=>await RunScs("compile");
     void CancelScs(object sender,RoutedEventArgs e)=>scsCancellation?.Cancel();
     async Task RunScs(string action) {
-        if(selected==null||scs==null||busy)return;SteamGame game=selected;
+        if(selected==null||scs==null||busy)return;
+        if(selected.Source!="Steam"){Log("SCSKiller integration currently requires a Steam game.");return;}SteamGame game=selected;
         if(action=="compile"&&setupState?.Configured==true&&selectedReceipt?.MiB>512){
             GlobalNotice.Severity=InfoBarSeverity.Informational;GlobalNotice.Title="Shader preparation uses the normal driver";
             GlobalNotice.Message="Your cache size is still set. SCSKiller currently uses the normal driver, so shader preparation is paused for this setup.";GlobalNotice.IsOpen=true;return;

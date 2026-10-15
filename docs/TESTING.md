@@ -32,8 +32,16 @@ See [build/test commands](DEVELOPMENT.md). Engine/native fixtures use local qual
 
 ## Built-in chip selection and plain-language workflow
 
-Both editions enumerate active Intel devices and retain a user-selected device identity. Policy fixtures verify built-in selection, available-device fallback and byte-qualified eligibility independent of model names. Changed files and unknown versions remain blocked. Primary UI states retain saved sizes during driver/routing changes and distinguish loaded-copy observations from unmeasured performance. Integrated-hardware gameplay has not been verified.
+The preview enumerates active Intel devices and retain a user-selected device identity. Policy fixtures verify built-in selection, available-device fallback and byte-qualified eligibility independent of model names. Changed files and unknown versions remain blocked. Primary UI states retain saved sizes during driver/routing changes and distinguish loaded-copy observations from unmeasured performance. Integrated-hardware gameplay has not been verified.
 
 ## Introduction and setup controls
 
-Introduction preferences are tested for first start, dismissal persistence and invalid preference recovery. Both editions build with the five-screen introduction, a single setup guide and visible size buttons. Read-only UI previews cover the welcome panel and game page. Existing Core/worker checks cover setup stages, missing receipts, closed-game checks, unsupported-driver refusal and consent gates. Hardware and cache-capacity limits above remain unchanged.
+Introduction preferences are tested for first start, dismissal persistence and invalid preference recovery. The preview builds with the five-screen introduction, a single setup guide and visible size buttons. Read-only UI previews cover the welcome panel and game page. Existing Core/worker checks cover setup stages, missing receipts, closed-game checks, unsupported-driver refusal and consent gates. Hardware and cache-capacity limits above remain unchanged.
+
+## Local libraries and manual games
+
+Fixtures cover Epic base-game/incomplete/DLC filtering, Legendary indexes, Battle.net registry and protobuf records, registered publisher classification, Xbox XML/DTD rejection, duplicate identities, malformed records, manual add/remove persistence and missing-executable recovery identity. Store-scoped keys preserve legacy Steam filenames and reject a non-Steam profile impersonating a Steam ID. Seven backend profile checks cover bounded executable paths and legacy compatibility without writing real profiles.
+
+Worker checks verify that non-Steam safety stays unknown without Steam category data and that read-only discovery never pins a stopped game's profile. Launch plans are constructed without executing manifest arguments or uninstall commands. Actual authentication, game launching and private-driver loading across every third-party launcher are not established by these fixtures. The launcher coverage table describes installation-record support, not universal game compatibility.
+
+The unified library preview passes 45 Core/worker checks and seven standalone backend identity/profile checks. A read-only local discovery/render check found Steam, Ubisoft, Xbox-folder and EA records with unique keys; no game or driver setup was installed by that check. Native helper and app builds passed.

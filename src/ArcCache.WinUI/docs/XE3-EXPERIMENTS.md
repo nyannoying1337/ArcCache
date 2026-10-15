@@ -1,6 +1,6 @@
 # Xe3 device experiments
 
-Use the **experimental build**. This workflow tests a private driver with Arc Cache's own D3D12 probe. It does not patch a game or replace the system driver.
+Use the unified preview. This workflow tests a private driver with Arc Cache's own D3D12 probe. It does not patch a game or replace the system driver.
 
 1. Open Graphics → Try a compatibility check. Choose **Check the installed test file**, or **Choose a driver file** for read-only assessment. The report separates structural matches from reviewed images.
 2. For the reviewed Xe3 32.0.101.9034 image, choose **512 MiB original control**, then **Create a test copy**. Read and confirm the experiment warning. Run normally, not as administrator.
