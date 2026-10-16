@@ -45,11 +45,10 @@ Arc Cache raises that limit **for the games you choose**. Together with [SCSKill
 
 Get the latest release on the [**Releases page**](https://github.com/nyannoying1337/ArcCache/releases/latest):
 
-- **`ArcCache-2026.10.16-Windows-x64.zip`**: extract the **whole** ZIP to a folder of your choice and run `ArcCache.exe`. Check it against the `.sha256` file if you like.
+- **`ArcCache-Setup-2026.10.16-Windows-x64.exe`**: the installer, recommended. It installs for your Windows account only (no admin rights needed), adds a Start menu entry and updates an older Arc Cache in place.
+- **`ArcCache-2026.10.16-Windows-x64.zip`**: the portable version. Extract the **whole** ZIP and run `ArcCache.exe`.
 
-Release 2026.10.16 ships as a ZIP only; a per-user installer will come back with a later release. If you installed an older version with its installer, uninstall it first or make sure you start the new `ArcCache.exe`, not the old Start menu entry.
-
-The app is unsigned, so Windows SmartScreen may ask once. It is self-contained, so you don't need .NET or anything else. It needs Windows 10 19041 or newer (tested on Windows 11) and an Intel Arc or Intel Xe graphics driver. A matching SCSKiller build is included in the `SCSKiller` folder.
+Each file has a `.sha256` next to it. Both are unsigned, so Windows SmartScreen may ask once. Arc Cache is self-contained, so you don't need .NET or anything else. It needs Windows 10 19041 or newer (tested on Windows 11) and an Intel Arc or Intel Xe graphics driver. A matching SCSKiller build is included in the `SCSKiller` folder.
 
 ## How it works
 

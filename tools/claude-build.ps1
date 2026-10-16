@@ -1,10 +1,10 @@
 # Arc Cache + SCSKiller-Arc build and test (run outside any sandbox: cmd /c tools\claude-build.cmd).
 # Builds only; never runs driver trials, game setups, compiles, Reset or Cleanup.
 # Log: tools\claude-build.log, last line "CLAUDE-BUILD-RESULT: OK" or "CLAUDE-BUILD-RESULT: FAIL <step>".
-param([switch]$SkipScs, [switch]$SkipApp, [switch]$NoLaunch, [switch]$GitStatus, [switch]$GitCommit, [switch]$GitPush, [switch]$Release, [string]$Version = '', [string]$RequestFile)
+param([switch]$SkipScs, [switch]$SkipApp, [switch]$NoLaunch, [switch]$GitStatus, [switch]$GitCommit, [switch]$GitPush, [switch]$Release, [switch]$Task, [string]$Version = '', [string]$RequestFile)
 if ($RequestFile -and (Test-Path -LiteralPath $RequestFile)) {
     $words = (Get-Content -LiteralPath $RequestFile -Raw) -split '\s+' | Where-Object { $_ }
-    $SkipScs = $words -contains '-SkipScs'; $SkipApp = $words -contains '-SkipApp'; $NoLaunch = $words -contains '-NoLaunch'; $GitStatus = $words -contains '-GitStatus'; $GitCommit = $words -contains '-GitCommit'; $GitPush = $words -contains '-GitPush'; $Release = $words -contains '-Release'
+    $SkipScs = $words -contains '-SkipScs'; $SkipApp = $words -contains '-SkipApp'; $NoLaunch = $words -contains '-NoLaunch'; $GitStatus = $words -contains '-GitStatus'; $GitCommit = $words -contains '-GitCommit'; $GitPush = $words -contains '-GitPush'; $Release = $words -contains '-Release'; $Task = $words -contains '-Task'
     $v = $words | Where-Object { $_ -match '^\d{4}\.\d{1,2}\.\d{1,2}$' } | Select-Object -First 1; if ($v) { $Version = $v }
 }
 $ErrorActionPreference = 'Stop'
@@ -35,6 +35,17 @@ function Run([string]$name, [string]$exe, [string[]]$a) {
     foreach ($k in ($out | Select-Object -Last 15)) { Add-Content -LiteralPath $log -Value "   > $k" }
     if ($code -ne 0) { throw "$name failed with exit code $code" }
     Say "   ok"
+}
+if ($Task) {
+    # -Task: runs the local, git-ignored tools\claude-task.ps1 (one-off maintenance) and logs its output.
+    Remove-Item $log -ErrorAction SilentlyContinue
+    $t = Join-Path $tools 'claude-task.ps1'
+    $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { & $t -Repo $repo -Work $work 2>&1 | ForEach-Object { Add-Content -LiteralPath $log -Value "$_" }; $res = 'OK' }
+    catch { Add-Content -LiteralPath $log -Value "ERROR: $_"; $res = 'FAIL task' }
+    $ErrorActionPreference = $old
+    Add-Content -LiteralPath $log -Value "CLAUDE-BUILD-RESULT: $res"
+    exit 0
 }
 if ($GitCommit -or $GitPush) {
     # -GitCommit: commits everything not ignored in both repos with the messages in tools\claude-commit-<repo>.txt (no push).
@@ -172,7 +183,7 @@ try {
         $relRoot = Join-Path $repo 'out\release'; $payload = Join-Path $relRoot "ArcCache-$Version"
         if (Test-Path $payload) { Remove-Item -LiteralPath $payload -Recurse -Force }
         New-Item -ItemType Directory -Force -Path $relRoot | Out-Null
-        Run 'release-publish' $dotnet @('publish', (Join-Path $repo 'src\ArcCache.WinUI\App\ArcCache.WinUI.csproj'), '-c', 'Release', '-p:Platform=x64', '-o', $payload)
+        Run 'release-publish' $dotnet @('publish', (Join-Path $repo 'src\ArcCache.WinUI\App\ArcCache.WinUI.csproj'), '-c', 'Release', '-p:Platform=x64', "-p:Version=$Version", '-o', $payload)
         Copy-Item (Join-Path $repo 'LICENSE'), (Join-Path $repo 'NOTICE.md') -Destination $payload
         Copy-Item (Join-Path $repo 'src\ArcCache.WinUI\docs\QUICKSTART.md') -Destination (Join-Path $payload 'GETTING-STARTED.md')
         $prev = Get-ChildItem (Join-Path $repo 'out') -Directory -Filter 'ArcCache-Release-*' | Sort-Object LastWriteTime -Descending | Select-Object -First 1

@@ -9,14 +9,10 @@ native-build/
 *.csv
 *.jsonl
 
-# local review notes and one-off scripts for one machine
+# local helpers for one machine (build watcher, one-off maintenance tasks, notes)
 CLAUDE-REVIEW*.md
 tools/*.txt
 tools/*.patch
 tools/claude-build.request*
 tools/claude-build-watch.cmd
-tools/run-b580-*
-tools/check-9034-fixture.*
-tools/cleanup-stray-icon.cmd
-tools/migrate-sandbox-appdata.cmd
-tools/read-startup-log.*
+tools/claude-task*
