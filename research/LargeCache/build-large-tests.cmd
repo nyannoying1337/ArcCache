@@ -11,7 +11,7 @@ if errorlevel 1 exit /b 1
 bin\LargeReadWrapperTests.exe
 if errorlevel 1 exit /b 1
 if "%~1"=="" exit /b 0
-"%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:exe /platform:x64 /out:bin\LargePatchTests.exe /reference:System.Core.dll /reference:System.Web.Extensions.dll LargePatchTests.cs ..\..\src\ArcCache.Engine\Engine.cs ..\..\src\ArcCache.Engine\LargeCachePatch.cs
+"%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:exe /platform:x64 /out:bin\LargePatchTests.exe /reference:System.Core.dll /reference:System.Web.Extensions.dll LargePatchTests.cs ..\..\src\ArcCache.Engine\Engine.cs ..\..\src\ArcCache.Engine\GenericCachePatch.cs ..\..\src\ArcCache.Engine\LargeCachePatch.cs ..\..\src\ArcCache.Engine\Xe1Patch.cs
 if errorlevel 1 exit /b 1
 bin\LargePatchTests.exe "%~1" bin
 exit /b %errorlevel%

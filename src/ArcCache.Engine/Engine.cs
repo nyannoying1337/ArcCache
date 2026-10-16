@@ -76,6 +76,7 @@ public static class Engine {
     public static byte[] Patch(byte[] bytes,int mib) {
         Inspect(bytes);
         if(bytes.Length>Size)bytes=LargeCachePatch.Original(bytes);
+        Require(mib!=4096,"A direct 4 GiB read can truncate to zero bytes. Use the isolated chunked driver-copy test for 4 GiB.");
         if(mib==8192||mib==16384){byte[] original=(byte[])bytes.Clone();Array.Copy(Context,12,original,Offset-4,24);byte[] large=LargeCachePatch.Build(original,mib);LargeCachePatch.Inspect(large);return large;}
         Require((mib>=128&&mib<=2047)||mib==2048||mib==4096,"Choose 128–2047 MiB, or experimental 2048/4096 MiB.");
         byte[] result=(byte[])bytes.Clone();Array.Copy(Context,12,result,Offset-4,24);

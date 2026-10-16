@@ -7,6 +7,10 @@ public sealed class ArtworkConverter : IValueConverter {
     public object? Convert(object value,Type targetType,object parameter,string language) => value is IEnumerable<string> paths?ArtworkImages.Get(paths,48):null;
     public object ConvertBack(object value,Type targetType,object parameter,string language) => throw new NotSupportedException();
 }
+public sealed class BooleanToVisibilityConverter : IValueConverter {
+    public object Convert(object value,Type targetType,object parameter,string language) => value is true?Microsoft.UI.Xaml.Visibility.Visible:Microsoft.UI.Xaml.Visibility.Collapsed;
+    public object ConvertBack(object value,Type targetType,object parameter,string language) => value is Microsoft.UI.Xaml.Visibility.Visible;
+}
 internal static class ArtworkImages {
     static readonly Dictionary<string,BitmapImage> cache=new(StringComparer.OrdinalIgnoreCase);
     public static BitmapImage? Get(IEnumerable<string> candidates,int width) {

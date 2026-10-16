@@ -1,6 +1,19 @@
 # Test coverage and compatibility
 
-Tests establish the behavior listed here. They do not establish support for every game or an increase in effective shader-cache capacity.
+Tests establish the behavior listed here. They do not establish support for every game.
+
+## Results for release 2026.10.16 (Arc B580, driver 32.0.101.9150, Windows 11)
+
+| Check | Result |
+| --- | --- |
+| Isolated size tests (control 512 MiB, then 1, 2, 4, 8, 16 GiB): device, pipelines, cache write and **reload** with the copy | All pass |
+| Palworld, 16 GiB, SCSKiller compile with the driver copy (94,165 PSOs planned) | Private driver confirmed before device creation; cache file 760.8 MB (stock cap 536.9 MB) |
+| Palworld, next game start | Copy loaded; cache file +2.3 MB; no other cache file changed (overlay verdict GOOD) |
+| Ready or Not, 16 GiB | Copy loads; setup verified across restarts |
+| App tests / SCSKiller tests | 83 / 74 checks pass |
+| Engine on the installed package | Xe2 and Xe3: 1–16 GiB buildable with unique matches; Xe1 guard: 1 GiB only |
+
+Earlier results (driver 9034): Witcher 3 single-player gameplay; Ready or Not menu with original, 1 and 4 GiB sets.
 
 | Area | Checked | Not established |
 | --- | --- | --- |
@@ -8,7 +21,7 @@ Tests establish the behavior listed here. They do not establish support for ever
 | Xe2 patches | Original/1/2/4 GiB image hashes, constructor state and exact normalization/rollback | Actual capacity, eviction or game-specific overrides |
 | Private game loading | Witcher 3 single-player gameplay; Ready or Not menu loading with repaired original, 1 and 4 GiB sets | Universal compatibility, multiplayer/anti-cheat acceptance |
 | Recovery | Consent gates, receipt/hash validation, temporary transactions, owner/group/DACL preservation and semantically equivalent ACLs | Recovery after arbitrary untracked modifications |
-| 8/16 GiB Xe2 experiments | Bounded wrapper, Windows unwind metadata, PE mapping, deterministic hashes, isolated B580 device/pipeline creation | Gameplay or reload with a cache larger than 4 GiB; low-memory parsing |
+| 4/8/16 GiB reload wrapper | Bounded wrapper, Windows unwind metadata, PE mapping, deterministic hashes, isolated B580 write+reload test; Palworld 16 GiB with a 760.8 MB cache | Caches of several GB in real games; low-memory parsing |
 
 ## Xe3
 

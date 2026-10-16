@@ -12,9 +12,9 @@ Run `ArcCache.exe`. This app includes game setup, driver checks, monitoring and 
 
 1. Open **Graphics** and choose **Allow game-specific graphics files**. Arc Cache explains the one-time Windows change and restart needed. Start Arc Cache manually as an administrator only for this change; afterward, open it normally. [Why this is required](PRIVATE-DRIVERS.md).
 2. Open the app normally. Select an installed game or choose Add game…, launch it in DX12 with the system driver, and leave it at the menu so the app can detect its rendering executable.
-3. Close the game. Choose **Set up this game** to make an unchanged copy of its Intel graphics files. This uses about 608 MiB per game.
+3. Close the game. Choose **Set up this game** to make an unchanged copy of its Intel graphics files. This uses about 1.3 GB per game with driver 32.0.101.9150.
 4. Launch DirectX 12 again; keep Arc Cache open until it checks that the game can use its separate files. Close the game after verification.
-5. Select a preset and apply it after confirmation. Launch normally through its usual launcher. The app can now be closed unless you want the overlay.
+5. Select a size and apply it after confirmation, then start the game once more so Arc Cache can confirm the new copy loads. The card then shows **Ready to play** with the size. Launch normally through its usual launcher afterwards; the app can be closed unless you want the overlay or SCSKiller.
 
 Read and acknowledge multiplayer/anti-cheat risk before applying. Detection is incomplete; a warning is not a guarantee that a game will accept modified driver files or that your account is safe. No anti-cheat is bypassed.
 
@@ -26,15 +26,20 @@ After a driver update, Arc Cache detects the changed active package while open. 
 
 ## SCSKiller and monitoring
 
-The optional bridge uses a separately installed, matching SCSKiller CLI chosen in Settings. These app-only downloads do not include the CLI. Community access depends on your existing SCSKiller account/settings. Compilation uses the **stock** driver; private-cap compilation and simultaneous recorder compatibility are unresolved. Do not interpret shared Intel cache growth as proven per-game shader growth. The external overlay uses no injection; borderless/windowed display is recommended and exclusive fullscreen is unverified.
+**Prepare shaders with SCSKiller** compiles a game's shaders before you play. The Arc Cache download includes a matching SCSKiller build (`SCSKiller\cli\scskiller.exe`); Settings or **Change** on the card can select another one. The card always shows which SCSKiller is used and whether it can use driver copies.
+
+For a game with a bigger size, the compile runs with that game's verified driver copy. SCSKiller checks before and after opening the GPU that the copy (by path and SHA-256) is what Windows loaded, and compiles nothing otherwise. Official SCSKiller releases (also portable/beta) can't do this, so Arc Cache blocks them for bigger sizes: they would trim the cache back to 512 MB. Don't compile Arc Cache games from the SCSKiller app itself for the same reason. Details: [SCSKiller guide](../../../docs/SCSKILLER.md).
+
+**Show on-screen stats** starts an external overlay (no injection; windowed or borderless display): the loaded driver copy, this game's Intel cache file with its size against the limit, and a verdict. *GOOD* means the file hardly grows while you play, so the game reads its prepared cache. *The file shrank* means the normal driver trimmed it. Arc Cache links a game to its cache file when it watches a SCSKiller compile; before that, the overlay shows the file that grows most as a guess.
 
 ## What has actually been checked
 
-Gameplay loading was checked in Witcher 3 with a private copy. Menu loading was checked in Ready or Not with repaired original, 1 GiB and 4 GiB copies. Loaded paths/disk hashes and unchanged system-driver hashes were observed. The Ready or Not repair handles a known 32-bit bundled debug helper with exact qualified 64-bit helpers copied from the player's system; changing a cap alone does not migrate older setups.
+- Arc B580, driver 32.0.101.9150: the unchanged control and every size (1, 2, 4, 8, 16 GB) pass the isolated test, which writes a shader cache and reloads it with the patched driver.
+- Palworld at 16 GB: a SCSKiller compile with the driver copy filled its cache file to 760.8 MB (the normal driver stops at 536.9 MB); the next game start loaded the copy, the file grew by only 2.3 MB and no other cache file changed.
+- Ready or Not at 16 GB: the copy loads and the setup shows Ready to play. Witcher 3 (earlier private copy) loaded gameplay.
+- Automated checks cover patch discovery, Xe1 size locks, receipts, recovery, consent gates, library fixtures, SCSKiller option/progress parsing and cache-file linking.
 
-2/4 GiB constructors, patch hashes, tamper rejection, receipts/recovery, semantic ACL equality, consent gates, Steam fixtures, and quiet UI polling have automated checks. Actual capacity/growth effects remain unmeasured. 8/16 GiB passed isolated B580 D3D12 device/pipeline creation probes and reload-wrapper/unwind tests, **not** large-cache gameplay/reload. Very large files can require roughly their file size in contiguous RAM: the larger patch does not implement a low-memory Intel parser.
-
-For source build/test instructions see [the app README](../README.md) and [the larger-cache research README](../../../research/LargeCache/README.md). Proprietary DLL test inputs are optional local files, not shipped fixtures.
+Not established: other games, Xe1/Xe3 hardware, anti-cheat acceptance and frame-time improvements. Very large cache files can need roughly their size in RAM while the driver loads them.
 
 ## Troubleshooting logs
 

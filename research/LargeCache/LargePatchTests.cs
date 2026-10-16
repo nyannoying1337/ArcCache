@@ -9,7 +9,8 @@ class LargePatchTests {
  static int Main(string[] args){try{
   byte[] original=File.ReadAllBytes(args[0]);foreach(int mib in new[]{8192,16384}){
    byte[] patched=Engine.Patch(original,mib);Check(Engine.Inspect(patched).MiB==mib,"qualified experimental cap "+mib);
-   Check(Engine.Hash(Engine.Patch(patched,4096))==Engine.FourGiB,"exact rollback to 4 GiB "+mib);
+   bool directFourBlocked=false;try{Engine.Patch(patched,4096);}catch(InvalidDataException){directFourBlocked=true;}Check(directFourBlocked,"unsafe direct 4 GiB route is locked "+mib);
+   byte[] chunkedFour=GenericCachePatch.Build(LargeCachePatch.Original(patched),4096);Check(GenericCachePatch.Discover(LargeCachePatch.Original(patched),"igd12um64xe2.dll",4096).NeedsReloadWrapper&&chunkedFour.Length>Engine.Size,"4 GiB rollback uses a discovered chunked wrapper "+mib);
    Check(Engine.Hash(Engine.Patch(patched,512))==Engine.Original,"exact rollback to original "+mib);
    byte[] changed=(byte[])patched.Clone();changed[0x2000]^=1;Reject(changed,"unrelated modification rejected");
    changed=(byte[])patched.Clone();changed[Engine.Size+88]^=1;Reject(changed,"unwind mutation rejected");

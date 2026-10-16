@@ -28,7 +28,7 @@ class CacheSnapshot {
     }
 }
 class CacheMonitor : Form {
-    readonly string executable,root,log;readonly CacheSnapshot initial;readonly Label text;readonly Timer timer=new Timer();int gamePid;DateTime started;int sampleCount;string driverStatus="Driver: not checked";string observedModulePath;readonly Func<string,string> inspectDriver;
+    readonly string executable,root,log;readonly CacheSnapshot initial;readonly Label text;readonly Timer timer=new Timer();int gamePid;DateTime started;int sampleCount;string driverStatus="Driver: not checked";string observedModulePath;readonly Func<string,string> inspectDriver;readonly string cacheFile;readonly long limitBytes;readonly DateTime monitorStarted=DateTime.Now;
     struct Rect {public int Left,Top,Right,Bottom;}
     [DllImport("user32.dll")]static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")]static extern uint GetWindowThreadProcessId(IntPtr window,out uint pid);
@@ -39,18 +39,41 @@ class CacheMonitor : Form {
     protected override bool ShowWithoutActivation {get{return true;}}
     protected override CreateParams CreateParams {get{var p=base.CreateParams;p.ExStyle|=0x20|0x08000000|0x80;return p;}}
     static string Number(long value){return (value/(1024.0*1024)).ToString("0.00",CultureInfo.InvariantCulture)+" MiB";}
-    public CacheMonitor(string exe,Func<string,string> inspect=null,string cacheRoot=null,string logFolder=null) {
-        inspectDriver=inspect;
+    // cacheFile: this game's Intel cache file when Arc Cache has linked it (64 hex), else null: then the file that grew the
+    // most since the overlay started is shown as the likely one. limitMiB: the game's cache size from its setup record.
+    public CacheMonitor(string exe,Func<string,string> inspect=null,string cacheRoot=null,string logFolder=null,string linkedCacheFile=null,int limitMiB=512) {
+        inspectDriver=inspect;cacheFile=linkedCacheFile!=null&&linkedCacheFile.Length==64&&System.Text.RegularExpressions.Regex.IsMatch(linkedCacheFile,"^[0-9A-Fa-f]{64}$")?linkedCacheFile:null;limitBytes=(long)Math.Max(512,limitMiB)<<20;
         executable=Path.GetFullPath(exe);root=cacheRoot??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),"AppData","LocalLow","Intel","ShaderCache");
         foreach(var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(executable)))using(p){IntPtr h=OpenProcess(0x1000,false,(uint)p.Id);try{if(h==IntPtr.Zero)continue;var path=new System.Text.StringBuilder(4096);uint n=4096;if(QueryFullProcessImageName(h,0,path,ref n)&&path.ToString().Equals(executable,StringComparison.OrdinalIgnoreCase)){gamePid=p.Id;started=p.StartTime;break;}}finally{if(h!=IntPtr.Zero)CloseHandle(h);}}
         if(gamePid==0)throw new InvalidOperationException("Launch the selected game before starting the overlay.");
         initial=CacheSnapshot.Read(root);string logs=logFolder??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap","logs");Directory.CreateDirectory(logs);log=Path.Combine(logs,"cache-monitor-"+DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff")+".csv");
         File.WriteAllText(log,"utc,pid,shared_intel_bytes,net_growth_bytes,changed_files,unreadable_files,private_bytes,working_set_bytes\r\n");
-        FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;TopMost=true;BackColor=Color.FromArgb(25,28,35);Opacity=0.88;ClientSize=new Size(450,178);
+        FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;TopMost=true;BackColor=Color.FromArgb(25,28,35);Opacity=0.88;ClientSize=new Size(520,236);
         text=new Label{Dock=DockStyle.Fill,Padding=new Padding(12),ForeColor=Color.White,Font=new Font("Segoe UI",11),BackColor=BackColor};Controls.Add(text);
         timer.Interval=2000;timer.Tick+=delegate{Sample();};Shown+=delegate{Sample();timer.Start();};FormClosed+=delegate{timer.Dispose();};
     }
     internal Bitmap PreviewImage(){Sample();var image=new Bitmap(Width,Height);using(var g=Graphics.FromImage(image)){g.Clear(BackColor);TextRenderer.DrawText(g,text.Text,text.Font,new Rectangle(12,12,Width-24,Height-24),text.ForeColor,TextFormatFlags.WordBreak|TextFormatFlags.NoPadding);}return image;}
+    string GameCacheLine(CacheSnapshot now) {
+        string name=cacheFile;string label="This game's cache file";
+        if(name==null){long best=0;foreach(var pair in now.Sizes){long old;long grew=pair.Value-(initial.Sizes.TryGetValue(pair.Key,out old)?old:0);if(grew>best){best=grew;name=pair.Key;}}label="Likely cache file (grew most)";if(name==null)return "This game's cache file: not linked yet (no file grew)";}
+        long size;if(!now.Sizes.TryGetValue(name,out size))return label+": not found";
+        long before;long grewSince=size-(initial.Sizes.TryGetValue(name,out before)?before:0);
+        double percent=limitBytes>0?size*100.0/limitBytes:0;
+        return label+": "+Number(size)+" of "+(limitBytes/(1024.0*1024*1024)).ToString("0.##",CultureInfo.InvariantCulture)+" GiB ("+percent.ToString("0.#",CultureInfo.InvariantCulture)+"%) · "+(grewSince>=0?"+":"")+Number(grewSince)+"\r\n"+CacheVerdict(now,name,size,grewSince);
+    }
+    // Is the game using its prepared cache? Hits read the file without growing it; misses compile and append. The stock
+    // driver trims a file over 512 MiB, so a shrinking file means the private copy isn't in use; another file growing
+    // much faster means the game is filling a different cache (another exe name). Read only: sizes, never contents.
+    string CacheVerdict(CacheSnapshot now,string name,long size,long grewSince) {
+        if(cacheFile==null)return "Cache use: link this game's file first (Prepare shaders) for a verdict";
+        long before;initial.Sizes.TryGetValue(name,out before);
+        if(before>(512L<<20)+(1L<<20)&&size<before-(1L<<20))return "Cache use: WARNING - the file shrank; the normal 512 MB driver may have trimmed it";
+        string other=null;long otherGrowth=0;foreach(var pair in now.Sizes){if(pair.Key.Equals(name,StringComparison.OrdinalIgnoreCase))continue;long old;long grew=pair.Value-(initial.Sizes.TryGetValue(pair.Key,out old)?old:0);if(grew>otherGrowth){otherGrowth=grew;other=pair.Key;}}
+        if(otherGrowth>(64L<<20)&&otherGrowth>Math.Max(grewSince,0)*4)return "Cache use: another cache file grows faster ("+other.Substring(0,8)+"..., +"+Number(otherGrowth)+")";
+        if((DateTime.Now-monitorStarted).TotalSeconds<60)return "Cache use: watching... (play for a minute)";
+        if(grewSince<(32L<<20))return "Cache use: GOOD - reading the prepared cache (only +"+Number(Math.Max(grewSince,0))+" new)";
+        return "Cache use: the game is still adding shaders (+"+Number(grewSince)+") - normal for new areas";
+    }
     void Sample() {
         long privateBytes=0,workingSet=0;
         try{using(var p=Process.GetProcessById(gamePid)){if(p.HasExited||p.StartTime!=started){Close();return;}privateBytes=p.PrivateMemorySize64;workingSet=p.WorkingSet64;
@@ -59,7 +82,7 @@ class CacheMonitor : Form {
         IntPtr front=GetForegroundWindow();uint foregroundPid;GetWindowThreadProcessId(front,out foregroundPid);Rect rect;
         if(foregroundPid==gamePid&&GetWindowRect(front,out rect)){Location=new Point(Math.Max(rect.Left,rect.Right-Width-18),rect.Top+42);if(!Visible)Show();}else if(Visible)Hide();
         var now=CacheSnapshot.Read(root);long growth=now.Bytes-initial.Bytes;int changed=now.ChangedSince(initial);
-        text.Text="Arc Cache · "+Path.GetFileNameWithoutExtension(executable)+"\r\n"+driverStatus+"\r\nAllocated memory: "+Number(privateBytes)+" · RAM in use: "+Number(workingSet)+"\r\nIntel cache (includes other apps): "+Number(now.Bytes)+"\r\nSize change: "+(growth>=0?"+":"")+Number(growth)+" · Changed files: "+changed+"\r\nUpdates every 2 seconds · files not readable: "+now.Unreadable+"";
+        text.Text="Arc Cache · "+Path.GetFileNameWithoutExtension(executable)+"\r\n"+driverStatus+"\r\n"+GameCacheLine(now)+"\r\nAllocated memory: "+Number(privateBytes)+" · RAM in use: "+Number(workingSet)+"\r\nIntel cache (all apps): "+Number(now.Bytes)+"\r\nSize change: "+(growth>=0?"+":"")+Number(growth)+" · Changed files: "+changed+"\r\nUpdates every 2 seconds · files not readable: "+now.Unreadable+"";
         try{File.AppendAllText(log,DateTime.UtcNow.ToString("o")+","+gamePid+","+now.Bytes+","+growth+","+changed+","+now.Unreadable+","+privateBytes+","+workingSet+"\r\n");}catch(IOException){text.Text+="\r\nLogging unavailable";}catch(UnauthorizedAccessException){text.Text+="\r\nLogging unavailable";}
     }
 }

@@ -5,6 +5,7 @@ using System.Text.Json;
 public static class GameLibraryTests {
  public static void Run(Action<string,Action> test,Action<bool,string> check){
   string root=Path.Combine(Path.GetTempPath(),"ArcLibraries-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
+  string? priorIconRoot=GameIconResolver.CacheRootOverride;GameIconResolver.CacheRootOverride=Path.Combine(root,"arc-cache-test-data");
   try{
    string game=Path.Combine(root,"Game");Directory.CreateDirectory(game);
    test("Library identities preserve Steam receipts and separate non-Steam stores and installs",()=>{
@@ -33,6 +34,7 @@ public static class GameLibraryTests {
       check(GameLibraries.ClassifyUninstall("id","Game",item.Publisher,game,null)?.Source==item.Source,"Registered source missing: "+item.Source);
     }
     check(GameLibraries.ClassifyUninstall("id","Ubisoft Connect","Ubisoft",game,null)==null,"Launcher client imported as game.");
+    string icon=Path.Combine(game,"game.exe");File.WriteAllBytes(icon,new byte[]{1,2,3});check(GameLibraries.ClassifyUninstall("game","Example","GOG.com",game,null,icon)?.Icon==icon,"Uninstall DisplayIcon was not carried into game metadata.");
    });
    test("Battle.net database reads known protobuf fields and rejects corrupt wire data",()=>{
     File.WriteAllText(Path.Combine(game,".build.info"),"fixture");var install=Field(1,Encoding.UTF8.GetBytes(game));var product=Field(1,Encoding.UTF8.GetBytes("wow")).Concat(Field(3,install)).ToArray();var bytes=Field(1,product);
@@ -40,12 +42,18 @@ public static class GameLibraryTests {
     Reject(()=>BattleNetRecords.Parse(bytes[..^1]));Reject(()=>BattleNetRecords.Parse([0]));Reject(()=>BattleNetRecords.Parse([0x0a,0xff,0xff,0xff,0xff,0x7f]));
    });
    test("Xbox config forbids XML entity expansion and discovery alone does not grant patch support",()=>{
-    var entry=GameLibraries.ParseXbox("<Game><Identity Name='fixture'/><ShellVisuals DefaultDisplayName='Xbox game'/><ExecutableList><Executable Name='Game.exe'/></ExecutableList></Game>",game).Single();var found=GameLibraries.FromEntry(entry);check(found.Source=="Xbox"&&!found.Supported,"Discovery granted compatibility.");
+    Directory.CreateDirectory(Path.Combine(game,"Assets"));File.WriteAllBytes(Path.Combine(game,"Assets","Logo.png"),new byte[]{1,2,3});File.WriteAllBytes(Path.Combine(game,"Assets","Logo.scale-400.png"),new byte[]{4,5,6});
+    var entry=GameLibraries.ParseXbox("<Game><Identity Name='fixture'/><ShellVisuals DefaultDisplayName='Xbox game' Square150x150Logo='Assets/Logo.png'/><ExecutableList><Executable Name='Game.exe'/></ExecutableList></Game>",game).Single();var found=GameLibraries.FromEntry(entry);check(found.Source=="Xbox"&&!found.Supported&&found.Icon==Path.Combine(game,"Assets","Logo.scale-400.png"),$"Xbox package's largest logo variant was not resolved or discovery granted compatibility. parsed={entry.Icon}; final={found.Icon}");
     try{_=GameLibraries.ParseXbox("<!DOCTYPE x [<!ENTITY data SYSTEM 'file:///C:/Windows/win.ini'>]><Game>&data;</Game>",game).ToArray();throw new Exception("XML entity accepted.");}catch(System.Xml.XmlException){}
+   });
+   test("HoYoPlay and Kuro game records resolve known executables and retain explicit safety warning",()=>{
+    string hoyo=Path.Combine(root,"hoyo");Directory.CreateDirectory(hoyo);string genshin=Path.Combine(hoyo,"GenshinImpact.exe");File.WriteAllBytes(genshin,new byte[]{1,2,3});var record=GameLibraries.ParseHoYoInstall("hk4e_global",hoyo);check(record?.Source=="HoYoPlay"&&record.Name=="Genshin Impact","HoYoPlay global registry record did not resolve.");var gameEntry=GameLibraries.FromEntry(record!);check(gameEntry.Supported&&gameEntry.SupportedExecutable==genshin,"Known HoYoPlay game executable was not found.");
+    string kuro=Path.Combine(root,"kuro");string nested=Path.Combine(kuro,"Wuthering Waves Game","Client","Binaries","Win64");Directory.CreateDirectory(nested);string shipping=Path.Combine(nested,"Client-Win64-Shipping.exe");File.WriteAllBytes(shipping,new byte[]{1,2,3});var kuroEntry=GameLibraries.ClassifyUninstall("KRInstall Wuthering Waves Overseas","Wuthering Waves","Guangzhou Kuro Technology Co., Ltd",kuro,null);check(kuroEntry?.Source=="Kuro"&&GameLibraries.FromEntry(kuroEntry!).SupportedExecutable==shipping,"Kuro uninstall record did not find the nested game executable.");
+    using var assessment=JsonDocument.Parse("{\"Allowed\":true,\"Message\":\"clean\",\"Marker\":null,\"Multiplayer\":\"Unknown\",\"SteamStatus\":\"Not checked\"}");check(SafetyPresentation.From(assessment.RootElement,"HoYoPlay").Warn&&SafetyPresentation.From(assessment.RootElement,"Kuro").Message.Contains("kernel anti-cheat"),"HoYoPlay/Kuro setup does not force the explicit anti-cheat risk warning.");check(SafetyPresentation.RequiresPerGameAcknowledgement(assessment.RootElement,"HoYoPlay",2048,false)&&SafetyPresentation.RequiresPerGameAcknowledgement(assessment.RootElement,"Kuro",8192,false)&&!SafetyPresentation.RequiresPerGameAcknowledgement(assessment.RootElement,"HoYoPlay",512,false)&&SafetyPresentation.RequiresPerGameAcknowledgement(default,"HoYoPlay",512,false,false),"HoYoPlay/Kuro larger-size confirmation does not require per-game acknowledgement or failed safety check.");
    });
    test("Manual games persist independently, keep recovery identity when missing, and do not auto-launch",()=>{
     string exe=Path.Combine(game,"Manual.exe");byte[] pe=new byte[512];pe[0]=0x4d;pe[1]=0x5a;BitConverter.GetBytes(128).CopyTo(pe,60);BitConverter.GetBytes(0x4550).CopyTo(pe,128);BitConverter.GetBytes((ushort)0x8664).CopyTo(pe,132);BitConverter.GetBytes((ushort)2).CopyTo(pe,150);BitConverter.GetBytes((ushort)0x20b).CopyTo(pe,152);File.WriteAllBytes(exe,pe);
-    var store=new ManualGameStore(Path.Combine(root,"manual"));var added=store.Add(exe,"My game");check(store.Read().Single().Key==added.Key&&!added.Supported,"Manual persistence or detection boundary failed.");store.Add(exe,"Renamed");check(store.Read().Count==1,"Manual duplicate added.");var launch=GameLaunch.For(added);check(launch.GameExecutable&&!launch.Protocol&&launch.Target==exe,"Manual launch plan is not exact selected executable.");
+    var store=new ManualGameStore(Path.Combine(root,"manual"));var added=store.Add(exe,"My game");check(store.Read().Single().Key==added.Key&&added.Supported&&added.SupportedExecutable==exe,"Manual persistence or exact-executable detection failed.");store.Add(exe,"Renamed");check(store.Read().Count==1,"Manual duplicate added.");var launch=GameLaunch.For(added);check(launch.GameExecutable&&!launch.Protocol&&launch.Target==exe,"Manual launch plan is not exact selected executable.");
     File.Delete(exe);check(store.Read().Single().Key==added.Key,"Missing game lost its recovery identity.");store.Remove(added.Key);check(store.Read().Count==0,"Manual removal failed.");
     string bad=Path.Combine(game,"Bad.exe");File.WriteAllText(bad,"not a PE");Reject(()=>store.Add(bad));
    });
@@ -55,7 +63,7 @@ public static class GameLibraryTests {
     var result=GameLibraries.Discover(Path.Combine(root,"no-steam"),Path.Combine(root,"app-empty"),locations,[new("GOG","1","GOG Game",game),new("GOG","1","GOG Game",game)]);
     check(result.Games.Count==2&&result.Games.Any(g=>g.Source=="Epic")&&result.Games.Any(g=>g.Source=="GOG")&&result.Warnings.Any(w=>w.Contains("bad.item")),"One broken record hid another game or duplicates remained.");
    });
-  }finally{Directory.Delete(root,true);}
+  }finally{GameIconResolver.CacheRootOverride=priorIconRoot;Directory.Delete(root,true);}
  }
  static void Reject(Action action){try{action();}catch(InvalidDataException){return;}throw new Exception("Expected invalid data refusal.");}
  static byte[] Field(byte tag,byte[] value){var result=new List<byte>{(byte)(tag*8+2)};uint n=(uint)value.Length;while(n>=128){result.Add((byte)(n|128));n>>=7;}result.Add((byte)n);result.AddRange(value);return result.ToArray();}

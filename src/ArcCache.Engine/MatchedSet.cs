@@ -11,7 +11,7 @@ public class MatchedSetReceipt {
     public int Schema {get;set;} public string Executable {get;set;} public string Folder {get;set;}
     public int MiB {get;set;} public string Status {get;set;} public Dictionary<string,string> Files {get;set;}
     public MatchedSet.ProfileInfo Game {get;set;}
-    public bool Trial {get;set;}public bool DebugFixed {get;set;}public string TrialReceipt {get;set;}public string Driver {get;set;}public string OriginalHash {get;set;}public string TrialPatchedHash {get;set;}public Dictionary<string,string> OriginalFiles {get;set;}
+    public bool Trial {get;set;}public bool DebugFixed {get;set;}public string TrialReceipt {get;set;}public int TrialMiB {get;set;}public string Driver {get;set;}public string OriginalHash {get;set;}public string TrialPatchedHash {get;set;}public Dictionary<string,string> OriginalFiles {get;set;}
 }
 public static class MatchedSet {
     public const string GameHash="2DF765398A3D1F165DB418271BE7200178320A4466817379F2FA0DC0001FB101";
@@ -121,17 +121,24 @@ public static class MatchedSet {
     public static bool IsTrialReceipt(string path){if(!File.Exists(path))return false;Engine.CheckPath(path);Require(new FileInfo(path).Length<=1048576,"Setup record exceeds bounds.");var data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(path));return data.ContainsKey("Schema")&&Convert.ToInt32(data["Schema"])==5;}
     static string Expected(string name,int mib,MatchedSetReceipt receipt){
         if(receipt==null||receipt.Schema!=5)return Expected(name,mib);
-        Require(mib==512||mib==1024,"This game trial offers only the unchanged copy and 1 GiB.");
+        int proofSize=receipt.TrialMiB==0?1024:receipt.TrialMiB;
+        Require(mib==512||mib==proofSize,"Test this cache size on the selected driver before applying it to a game.");
         return name.Equals(receipt.Driver,StringComparison.OrdinalIgnoreCase)?mib==512?receipt.OriginalHash:receipt.TrialPatchedHash:receipt.OriginalFiles[name];
     }
     static Dictionary<string,string> Package(MatchedSetReceipt r){return r.Schema==5?r.OriginalFiles:Originals;}
     public static string OriginalDriverHash(MatchedSetReceipt r){return r.Schema==5?r.OriginalHash:Engine.Original;}
     public static string DriverName(MatchedSetReceipt r){return r.Schema==5?r.Driver:Xe2;}
-    public static void RequireTrialCurrent(MatchedSetReceipt r){Require(r.Schema==5&&r.Trial,"This is not a game-trial record.");var proof=DriverTrial.VerifySuccessful(r.TrialReceipt,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"),true);Require((string)proof["OriginalHash"]==r.OriginalHash&&(string)proof["PatchedHash"]==r.TrialPatchedHash&&(string)proof["Driver"]==r.Driver,"The game setup belongs to a different graphics test.");var sources=(Dictionary<string,object>)proof["Sources"];Require(sources.Count==r.OriginalFiles.Count&&r.OriginalFiles.All(e=>sources.ContainsKey(e.Key)&&(string)sources[e.Key]==e.Value),"Game trial dependencies differ from the successful test.");}
-    static byte[] PatchGame(byte[] current,int mib,MatchedSetReceipt receipt){if(receipt.Schema!=5)return Engine.Patch(current,mib);Require(Engine.Hash(current)==receipt.Files[receipt.Driver],"The game's test file changed.");string backup=Path.Combine(Path.GetDirectoryName(receipt.TrialReceipt),"backup",receipt.Driver);Engine.CheckPath(backup);Require(new FileInfo(backup).Length<=128L*1024*1024,"Trial backup exceeds bounds.");byte[] original=File.ReadAllBytes(backup);Require(Engine.Hash(original)==receipt.OriginalHash,"Trial backup changed.");byte[] result=DriverTrial.Patch(original,mib);Require(Engine.Hash(result)==Expected(receipt.Driver,mib,receipt),"Trial output does not match its successful check.");return result;}
+    public static void RequireTrialCurrent(MatchedSetReceipt r){Require(r.Schema==5&&r.Trial,"This is not a game-trial record.");var proof=DriverTrial.VerifySuccessful(r.TrialReceipt,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"),true);int proofSize=Convert.ToInt32(proof["MiB"]);Require((r.TrialMiB==0?proofSize:r.TrialMiB)==proofSize&&(string)proof["OriginalHash"]==r.OriginalHash&&(string)proof["PatchedHash"]==r.TrialPatchedHash&&(string)proof["Driver"]==r.Driver,"The game setup belongs to a different driver-size test.");var sources=(Dictionary<string,object>)proof["Sources"];Require(sources.Count==r.OriginalFiles.Count&&r.OriginalFiles.All(e=>sources.ContainsKey(e.Key)&&(string)sources[e.Key]==e.Value),"Game trial dependencies differ from the successful test.");}
+    static byte[] PatchGame(byte[] current,int mib,MatchedSetReceipt receipt){if(receipt.Schema!=5)return Engine.Patch(current,mib);Require(Engine.Hash(current)==receipt.Files[receipt.Driver],"The game's test file changed.");string backup=Path.Combine(Path.GetDirectoryName(receipt.TrialReceipt),"backup",receipt.Driver);Engine.CheckPath(backup);Require(new FileInfo(backup).Length<=128L*1024*1024,"Trial backup exceeds bounds.");byte[] original=File.ReadAllBytes(backup);Require(Engine.Hash(original)==receipt.OriginalHash,"Trial backup changed.");byte[] result=DriverTrial.Patch(original,mib,receipt.Driver);Require(Engine.Hash(result)==Expected(receipt.Driver,mib,receipt),"Trial output does not match its successful check.");return result;}
     public static void ValidateReceipt(MatchedSetReceipt r) {
         Require(r!=null&&(r.Schema==3||r.Schema==4||r.Schema==5)&&r.Files!=null,"Unsupported matched-set receipt.");
-        if(r.Schema==5){Require(r.Trial&&r.Game!=null&&r.Game.Schema==2&&r.OriginalFiles!=null&&r.OriginalFiles.Count<=128&&r.OriginalFiles.Count>=2&&DriverTrial.SupportedName(r.Driver),"Invalid game-trial record.");Require(r.OriginalFiles.ContainsKey(r.Driver)&&r.OriginalFiles[r.Driver]==r.OriginalHash&&r.OriginalFiles.ContainsKey("igd12umd64.dll")&&r.Game.ObservedDriverHash==r.OriginalHash&&r.TrialReceipt==r.Game.TrialReceipt,"Game trial source differs.");foreach(var file in r.OriginalFiles)Require(Path.GetFileName(file.Key)==file.Key&&file.Key.EndsWith(".dll",StringComparison.OrdinalIgnoreCase)&&System.Text.RegularExpressions.Regex.IsMatch(file.Value??"","\\A[0-9A-F]{64}\\z"),"Invalid trial dependency.");Require(System.Text.RegularExpressions.Regex.IsMatch(r.TrialPatchedHash??"","\\A[0-9A-F]{64}\\z"),"Invalid patched hash.");}
+        if(r.Schema==5){Require(r.Trial&&r.Game!=null&&r.Game.Schema==2&&r.OriginalFiles!=null&&r.OriginalFiles.Count<=128&&r.OriginalFiles.Count>=2&&DriverTrial.SupportedName(r.Driver),"Invalid game-trial record.");
+            // Game.TrialReceipt is the proof recorded when the game's loaded driver
+            // was observed. TrialReceipt is refreshed when another size is tested
+            // or applied. Both can refer to different size tests on the same original
+            // driver; the original hash and active proof are validated separately.
+            Require(r.OriginalFiles.ContainsKey(r.Driver)&&r.OriginalFiles[r.Driver]==r.OriginalHash&&r.OriginalFiles.ContainsKey("igd12umd64.dll")&&r.Game.ObservedDriverHash==r.OriginalHash,"Game trial source differs.");
+            foreach(var file in r.OriginalFiles)Require(Path.GetFileName(file.Key)==file.Key&&file.Key.EndsWith(".dll",StringComparison.OrdinalIgnoreCase)&&System.Text.RegularExpressions.Regex.IsMatch(file.Value??"","\\A[0-9A-F]{64}\\z"),"Invalid trial dependency.");Require(System.Text.RegularExpressions.Regex.IsMatch(r.TrialPatchedHash??"","\\A[0-9A-F]{64}\\z"),"Invalid patched hash.");}
         var package=Package(r);Require(r.Files.Count==package.Count+((r.Schema==4||r.Schema==5&&r.DebugFixed)?DebugHelpers.Count:0),"Setup membership differs.");
         string exe=Path.GetFullPath(r.Executable),folder=Path.GetFullPath(r.Folder);
         if(r.Game!=null)Require(ProfileExecutable(r.Game).Equals(exe,StringComparison.OrdinalIgnoreCase),"Receipt game profile differs from its target.");else Profile(exe);
@@ -146,14 +153,23 @@ public static class MatchedSet {
         using(var stream=new FileStream(tmp,FileMode.CreateNew,FileAccess.Write,FileShare.None)){stream.Write(bytes,0,bytes.Length);stream.Flush(true);}
         if(File.Exists(path))File.Replace(tmp,path,null);else File.Move(tmp,path);
     }
+    internal static void SaveChangeStarted(string path,MatchedSetReceipt receipt,Action afterSave=null){receipt.Status="change-started";Save(path,receipt);if(afterSave!=null)afterSave();}
     public static MatchedSetReceipt Read(string path) {Engine.CheckPath(path);var r=new JavaScriptSerializer().Deserialize<MatchedSetReceipt>(File.ReadAllText(path));ValidateReceipt(r);return r;}
+    internal static void MarkChangedRuntimeUnverified(MatchedSetReceipt receipt){receipt.Status="changed-runtime-unverified";}
+    // Saves that the running game loaded this receipt's own driver file for its current size.
+    // Change() resets Status to changed-runtime-unverified, so a verified status always refers to the current MiB.
+    public static void RecordSizeLoading(string path,string observedDriverHash){var receipt=Read(path);ValidateContents(receipt);string driver=DriverName(receipt);Require(receipt.Files!=null&&receipt.Files.ContainsKey(driver)&&String.Equals(receipt.Files[driver],observedDriverHash,StringComparison.OrdinalIgnoreCase),"The loaded driver does not match this game's saved cache size.");receipt.Status=receipt.MiB==512?"original-control-loading-verified":"size-loading-verified";Save(path,receipt);}
     public static void RecordOriginalLoading(string path){var receipt=Read(path);Require(receipt.MiB==512,"Only unchanged original controls can be verified.");ValidateContents(receipt);receipt.Status="original-control-loading-verified";Save(path,receipt);}
     public static void ValidateContents(MatchedSetReceipt r) {
         ValidateReceipt(r);Engine.CheckPath(r.Folder);
         Require(Directory.EnumerateFileSystemEntries(r.Folder).Count()==r.Files.Count,"Private set contains unexpected files; nothing will be removed.");
         foreach(var entry in r.Files){string file=Path.Combine(r.Folder,entry.Key);Engine.CheckPath(file);Require(File.Exists(file)&&IsolationControl.FileHash(file)==entry.Value,"Private set changed: "+entry.Key);}
     }
+    internal static void ValidatePrepareObservation(ProfileInfo profile,IDictionary<string,object> proof) {
+        Require(profile!=null&&proof!=null&&proof.ContainsKey("OriginalHash")&&profile.Schema==2&&String.Equals(profile.ObservedDriverHash,Convert.ToString(proof["OriginalHash"]),StringComparison.OrdinalIgnoreCase),"Start this game once with its normal driver so Arc Cache can find it.");
+    }
     public static string Prepare(string executable,string driverFolder,string receiptPath,int mib,string trialReceipt=null) {
+        Require(mib!=4096||trialReceipt!=null,"A 4 GiB copy must use its own chunked driver-copy test first.");
         ValidateGame(executable);Closed(executable);driverFolder=Path.GetFullPath(driverFolder);Engine.CheckPath(driverFolder);
         string root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),@"System32\DriverStore\FileRepository")+Path.DirectorySeparatorChar;
         Require(driverFolder.StartsWith(root,StringComparison.OrdinalIgnoreCase),"Choose the installed driver package inside DriverStore.");
@@ -164,7 +180,7 @@ public static class MatchedSet {
         Engine.CheckPath(Path.GetDirectoryName(receiptPath));Require(!File.Exists(receiptPath)&&!Directory.Exists(folder)&&!File.Exists(folder),"Receipt or redirection path already exists.");
         Dictionary<string,string> package=Originals;Dictionary<string,object> proof=null;
         if(trialReceipt==null)Require(Profile(full).Schema!=2,"Use the explicit game-trial setup action for this profile.");
-        if(trialReceipt!=null){Require(mib==512,"Start game trials with an unchanged copy.");proof=DriverTrial.VerifySuccessful(trialReceipt,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"),true);Require(((string)proof["SourceFolder"]).Equals(driverFolder,StringComparison.OrdinalIgnoreCase),"The selected driver differs from this test.");package=((Dictionary<string,object>)proof["Sources"]).ToDictionary(e=>e.Key,e=>(string)e.Value,StringComparer.OrdinalIgnoreCase);Require(Profile(full).Schema==2&&Profile(full).TrialReceipt==trialReceipt,"Start this game with its normal driver first so Arc Cache can find it.");}
+        if(trialReceipt!=null){Require(mib==512,"Start game trials with an unchanged copy.");proof=DriverTrial.VerifySuccessful(trialReceipt,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"),true);Require(((string)proof["SourceFolder"]).Equals(driverFolder,StringComparison.OrdinalIgnoreCase),"The selected driver differs from this test.");package=((Dictionary<string,object>)proof["Sources"]).ToDictionary(e=>e.Key,e=>(string)e.Value,StringComparer.OrdinalIgnoreCase);var trialProfile=Profile(full);ValidatePrepareObservation(trialProfile,proof);}
         foreach(var entry in package) {
             Require(!File.Exists(Path.Combine(Path.GetDirectoryName(full),entry.Key)),"Game root already contains Intel package DLL: "+entry.Key);
             string source=Path.Combine(driverFolder,entry.Key);Engine.CheckPath(source);Require(IsolationControl.FileHash(source)==entry.Value,"Unsupported or changed package file: "+entry.Key);
@@ -172,7 +188,7 @@ public static class MatchedSet {
         long total=0;foreach(var entry in package)total=checked(total+new FileInfo(Path.Combine(driverFolder,entry.Key)).Length);Require(new DriveInfo(Path.GetPathRoot(folder)).AvailableFreeSpace>=total+64L*1024*1024,"Not enough disk space for this game copy.");
         bool fixDebug=NeedsDebugRoutingFix(full);if(fixDebug)ValidateDebugSources();
         var gameProfile=Profile(full);
-        var r=new MatchedSetReceipt{Schema=trialReceipt!=null?5:fixDebug?4:3,Trial=trialReceipt!=null,DebugFixed=fixDebug,TrialReceipt=trialReceipt,Driver=proof==null?Xe2:(string)proof["Driver"],OriginalHash=proof==null?Engine.Original:(string)proof["OriginalHash"],TrialPatchedHash=proof==null?Engine.OneGiB:(string)proof["PatchedHash"],OriginalFiles=proof==null?null:package,Executable=full,Folder=folder,MiB=mib,Status="prepare-started",Files=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase),Game=gameProfile.Schema==1||gameProfile.Schema==2?gameProfile:null};
+        var r=new MatchedSetReceipt{Schema=trialReceipt!=null?5:fixDebug?4:3,Trial=trialReceipt!=null,DebugFixed=fixDebug,TrialReceipt=trialReceipt,TrialMiB=proof==null?0:Convert.ToInt32(proof["MiB"]),Driver=proof==null?Xe2:(string)proof["Driver"],OriginalHash=proof==null?Engine.Original:(string)proof["OriginalHash"],TrialPatchedHash=proof==null?Engine.OneGiB:(string)proof["PatchedHash"],OriginalFiles=proof==null?null:package,Executable=full,Folder=folder,MiB=mib,Status="prepare-started",Files=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase),Game=gameProfile.Schema==1||gameProfile.Schema==2?gameProfile:null};
         foreach(var entry in package)r.Files.Add(entry.Key,Expected(entry.Key,mib,r));if(fixDebug)foreach(var entry in DebugHelpers)r.Files.Add(entry.Key,entry.Value);Save(receiptPath,r);
         string staging=folder+".pending-"+Guid.NewGuid().ToString("N");Directory.CreateDirectory(staging);
         try {
@@ -195,21 +211,34 @@ public static class MatchedSet {
         // Failed staging is retained with pinned hashes for inspection; never recursively remove game paths.
     }
     public static string ChangeCap(string receiptPath,int mib,string backupRoot=null) {
-        var r=Read(receiptPath);Closed(r.Executable,r.Game);ValidateGame(r.Executable,r.Game);ValidateContents(r);RequireDebugCompatibility(r);Expected(DriverName(r),mib,r);if(r.Schema==5)RequireTrialCurrent(r);
+        var r=Read(receiptPath);Require(mib!=4096||r.Schema==5,"A 4 GiB copy must use its own chunked driver-copy test first.");Closed(r.Executable,r.Game);ValidateGame(r.Executable,r.Game);ValidateContents(r);RequireDebugCompatibility(r);if(r.Schema==5){RequireTrialCurrent(r);string proofPath=DriverTrial.FindSuccessful(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"),mib,r.Driver);Require(proofPath!=null,"Test "+(mib==512?"Default":(mib/1024)+" GB")+" first on this exact driver.");var proof=DriverTrial.VerifySuccessful(proofPath,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"),true);Require((string)proof["OriginalHash"]==r.OriginalHash,"This size test belongs to a different driver file.");var proofSources=(Dictionary<string,object>)proof["Sources"];Require(proofSources.Count==r.OriginalFiles.Count&&r.OriginalFiles.All(e=>proofSources.ContainsKey(e.Key)&&(string)proofSources[e.Key]==e.Value),"This size test belongs to a different driver package.");r.TrialReceipt=proofPath;r.TrialMiB=mib;r.TrialPatchedHash=(string)proof["PatchedHash"];}
+        Expected(DriverName(r),mib,r);
         string target=Path.Combine(r.Folder,DriverName(r)),staging=target+".pending";Require(!File.Exists(staging),"Staged DLL already exists; recover before continuing.");
-        var previousAcl=Engine.Security(target);string backup=null;
-        if(mib>=8192||r.MiB>=8192){
+        var previousAcl=Engine.Security(target);string backup=null;byte[] before=File.ReadAllBytes(target);
+        byte[] bytes=PatchGame(r.Schema==5?before:Engine.Read(target),mib,r);
+        if(DriverTrial.RequiresChangeJournal(r.MiB,mib)){
             string backups=backupRoot??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap","large-cache-backups");Directory.CreateDirectory(backups);Engine.CheckPath(backups);
             backup=Path.Combine(backups,DateTime.UtcNow.ToString("yyyyMMdd-HHmmss")+"-"+Guid.NewGuid().ToString("N"));
-            var journal=Engine.Prepare(target,backup,mib);Require(journal.Before.Hash==r.Files[DriverName(r)],"Private driver differs from backup journal.");File.Copy(receiptPath,Path.Combine(backup,"game-receipt-before.json"));
+            WriteLargeChangeJournal(backup,target,before,bytes,previousAcl,receiptPath,r);
         }
-        byte[] bytes=PatchGame(r.Schema==5?File.ReadAllBytes(target):Engine.Read(target),mib,r);r.Status="change-started";Save(receiptPath,r);
+        SaveChangeStarted(receiptPath,r);
         using(var stream=new FileStream(staging,FileMode.CreateNew,FileAccess.Write,FileShare.None)){stream.Write(bytes,0,bytes.Length);stream.Flush(true);}
         try {
             Closed(r.Executable,r.Game);Require(IsolationControl.FileHash(target)==r.Files[DriverName(r)],"Private DLL changed before replacement.");
-            File.Replace(staging,target,null);r.MiB=mib;r.Files[DriverName(r)]=Expected(DriverName(r),mib,r);Require(Engine.Equivalent(Engine.Security(target),previousAcl),"Private driver ACL changed during replacement; inspect the backup journal.");r.Status="changed-runtime-unverified";Save(receiptPath,r);ValidateContents(r);
+            File.Replace(staging,target,null);r.MiB=mib;r.Files[DriverName(r)]=Expected(DriverName(r),mib,r);Require(Engine.Equivalent(Engine.Security(target),previousAcl),"Private driver ACL changed during replacement; inspect the backup journal.");MarkChangedRuntimeUnverified(r);Save(receiptPath,r);ValidateContents(r);
             return "Private Xe2 copy changed to "+mib+" MiB. Installed driver unchanged. Re-launch the game in DX12 and observe the loaded path."+(backup==null?"":"\r\nBackup of previous DLL, next DLL, ACL and receipt: "+backup);
         } catch {r.Status="recovery-required";Save(receiptPath,r);throw;}
+    }
+    static void WriteLargeChangeJournal(string folder,string target,byte[] before,byte[] after,AclSnapshot acl,string receiptPath,MatchedSetReceipt receipt) {
+        Require(!Directory.Exists(folder)&&!File.Exists(folder),"Backup journal path already exists.");Directory.CreateDirectory(folder);Engine.CheckPath(folder);
+        string beforePath=Path.Combine(folder,"before.dll"),afterPath=Path.Combine(folder,"after.dll"),receiptCopy=Path.Combine(folder,"game-receipt-before.json");
+        using(var s=new FileStream(beforePath,FileMode.CreateNew,FileAccess.Write,FileShare.None)){s.Write(before,0,before.Length);s.Flush(true);}
+        using(var s=new FileStream(afterPath,FileMode.CreateNew,FileAccess.Write,FileShare.None)){s.Write(after,0,after.Length);s.Flush(true);}
+        File.Copy(receiptPath,receiptCopy);
+        Require(Engine.Hash(File.ReadAllBytes(beforePath))==Engine.Hash(before)&&Engine.Hash(File.ReadAllBytes(afterPath))==Engine.Hash(after),"Large cache change backup verification failed.");
+        Require(Engine.Hash(before)==receipt.Files[DriverName(receipt)],"Private driver differs from the receipt before backup.");
+        var journal=new {Schema=1,Kind="Private game driver size-change recovery",Target=Path.GetFullPath(target),OriginalHash=Engine.Hash(before),NextHash=Engine.Hash(after),OriginalAcl=acl,Driver=DriverName(receipt),PreviousMiB=receipt.MiB,NextMiB=receipt.TrialMiB,CreatedUtc=DateTime.UtcNow.ToString("o")};
+        File.WriteAllText(Path.Combine(folder,"journal.json"),new JavaScriptSerializer().Serialize(journal));
     }
     public static string Remove(string receiptPath) {
         var r=Read(receiptPath);Closed(r.Executable,r.Game);

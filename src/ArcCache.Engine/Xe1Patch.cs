@@ -17,8 +17,9 @@ public static class Xe1Patch {
  }
  public static int[] CandidateOffsets(byte[] bytes){var d=DefinitionFor(bytes);if(d==null)return new int[0];Layout(bytes,d);return new[]{d.Offset};}
  public static byte[] Patch(byte[] original,int mib){
-  var d=DefinitionFor(original);Require(d!=null,"No reviewed Xe1 definition for this exact driver. Unknown Xe1 versions are blocked.");Require(mib==512||mib==1024,"Xe1 currently offers the unchanged control and a 1 GiB test copy.");Layout(original,d);var result=(byte[])original.Clone();if(mib==1024)Array.Copy(BitConverter.GetBytes(0x40000000),0,result,d.Offset+16,4);
-  var normalized=(byte[])result.Clone();Array.Copy(original,d.Offset+16,normalized,d.Offset+16,4);Require(normalized.SequenceEqual(original)&&Engine.Hash(result)==(mib==512?d.Original:d.OneGiB),"Xe1 output differs from the reviewed single-value patch.");return result;
+  var plan=GenericCachePatch.Discover(original,FileName,mib);Require(plan.CanBuild,plan.Reason);var result=GenericCachePatch.Build(original,mib,FileName);var d=DefinitionFor(original);
+  if(d!=null&&mib==1024)Require(Engine.Hash(result)==d.OneGiB,"Xe1 output differs from the reviewed 1 GiB fixture.");
+  return result;
  }
 }
 }

@@ -36,9 +36,21 @@ public static class Isolation {
         string candidate=Path.Combine(Path.GetDirectoryName(Path.GetFullPath(executable)),"d3d12.dll");
         return File.Exists(candidate)?candidate:null;
     }
+    public static string LocalDirectXProxy(string executable) {
+        string directory=Path.GetDirectoryName(Path.GetFullPath(executable));
+        foreach(string name in new[]{"d3d12.dll","dxgi.dll"}) {
+            string candidate=Path.Combine(directory,name);
+            if(File.Exists(candidate))return candidate;
+        }
+        return null;
+    }
+    public static string LocalPrivatePath(string executable) {
+        string candidate=Path.GetFullPath(executable)+".local";
+        return File.Exists(candidate)||Directory.Exists(candidate)?candidate:null;
+    }
     public static void RequireNoLocalD3D12(string executable) {
-        string local=LocalD3D12(executable);
-        if(local!=null)throw new InvalidDataException("Per-game .local setup is blocked because this game already has a local d3d12.dll. Redirection can send a forwarding proxy's system-D3D12 load back to itself, causing recursion. Preserve the existing DLL; do not combine these mechanisms until compatibility is verified.\r\n"+local);
+        string local=LocalDirectXProxy(executable);
+        if(local!=null)throw new InvalidDataException("Per-game .local setup is blocked because this game already has a local DirectX proxy. Another mod may also hook DirectX, and combining the two can crash the game. Preserve the existing DLL; do not combine these mechanisms until compatibility is verified.\r\n"+local);
     }
     public static string FindWitcher() {
         var roots=new List<string>();

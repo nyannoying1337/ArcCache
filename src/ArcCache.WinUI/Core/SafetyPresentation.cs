@@ -1,6 +1,13 @@
 ﻿using System.Text.Json;
 namespace ArcCache.Core;
 public sealed record SafetyPresentation(string Title,string Message,bool Warn) {
+    public static bool RequiresPerGameAcknowledgement(JsonElement assessment,string source,int mib,bool trialMode,bool assessmentAvailable=true) =>
+        trialMode || !assessmentAvailable || assessment.ValueKind!=JsonValueKind.Object || !assessment.GetProperty("Allowed").GetBoolean() ||
+        ((source is "HoYoPlay" or "Kuro") && mib>512);
+    public static SafetyPresentation From(JsonElement assessment,string source) {
+        if(source is "HoYoPlay" or "Kuro")return new("Likely kernel anti-cheat",$"{source} games may use kernel anti-cheat. A modified Intel driver could block the game or risk your account. Only continue if you accept that risk; use Default for online play.",true);
+        return From(assessment);
+    }
     public static SafetyPresentation From(JsonElement assessment) {
         if(assessment.GetProperty("Allowed").GetBoolean())return new("","",false);
         string reason=assessment.GetProperty("Message").GetString()??"";

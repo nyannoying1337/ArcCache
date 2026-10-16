@@ -17,8 +17,16 @@ public static class GameLibraries {
         if(root.StartsWith(@"\\",StringComparison.Ordinal))throw new InvalidDataException("Automatic discovery supports local game folders only.");
         if(!Directory.Exists(root))throw new DirectoryNotFoundException("Game installation is missing.");
         if((File.GetAttributes(root)&FileAttributes.ReparsePoint)!=0)throw new InvalidDataException("Linked installation roots cannot be verified by this build.");
-        var game=new SteamGame(0,entry.Name,root,LocalArtwork(root),Icon:entry.Icon,Source:entry.Source,ExternalId:entry.Id,NativeLaunchId:entry.LaunchId);_=game.Key;return game;
+        string? executable=FindKnownExecutable(root,entry.Source,entry.Id);string? icon=GameIconResolver.FromExecutable(entry.Icon)??(entry.Icon!=null&&File.Exists(entry.Icon)?entry.Icon:null)??GameIconResolver.FromExecutable(executable);
+        var game=new SteamGame(0,entry.Name,root,LocalArtwork(root),DetectedExecutable:executable,Detected:executable!=null,Icon:icon,Source:entry.Source,ExternalId:entry.Id,NativeLaunchId:entry.LaunchId);_=game.Key;return game;
     }
+    static string? FindKnownExecutable(string root,string source,string id){
+        if(source.Equals("Kuro",StringComparison.OrdinalIgnoreCase)){string[] suffixes={Path.Combine("Wuthering Waves Game","Client","Binaries","Win64","Client-Win64-Shipping.exe"),Path.Combine("Client","Binaries","Win64","Client-Win64-Shipping.exe")};foreach(string rel in suffixes){string p=Path.Combine(root,rel);if(File.Exists(p)&&SafeLocalFile(p))return p;}}
+        if(source.Equals("HoYoPlay",StringComparison.OrdinalIgnoreCase)){string[] names=id.IndexOf("hkrpg",StringComparison.OrdinalIgnoreCase)>=0?new[]{"StarRail.exe"}:id.IndexOf("nap",StringComparison.OrdinalIgnoreCase)>=0?new[]{"ZenlessZoneZero.exe"}:id.IndexOf("bh3",StringComparison.OrdinalIgnoreCase)>=0?new[]{"BH3.exe"}:new[]{"GenshinImpact.exe","YuanShen.exe"};foreach(string candidate in FindExecutables(root,new HashSet<string>(names,StringComparer.OrdinalIgnoreCase),5,512))return candidate;}
+        return null;
+    }
+    static IEnumerable<string> FindExecutables(string root,ISet<string> names,int maxDepth,int maxDirectories){var pending=new Stack<(string Path,int Depth)>();pending.Push((root,0));var result=new List<string>();int visited=0;while(pending.Count>0&&visited++<maxDirectories){var current=pending.Pop();if(!SafeLocalFile(current.Path+Path.DirectorySeparatorChar+"."))continue;try{foreach(string file in Directory.EnumerateFiles(current.Path,"*.exe").Take(512))if(names.Contains(Path.GetFileName(file))&&SafeLocalFile(file))result.Add(file);if(current.Depth<maxDepth)foreach(string dir in Directory.EnumerateDirectories(current.Path).Take(256))if((File.GetAttributes(dir)&FileAttributes.ReparsePoint)==0)pending.Push((dir,current.Depth+1));}catch(IOException){}catch(UnauthorizedAccessException){}}return result;}
+    static bool SafeLocalFile(string path){try{if(!Path.IsPathRooted(path)||path.StartsWith(@"\\",StringComparison.Ordinal)||(File.GetAttributes(path)&FileAttributes.ReparsePoint)!=0)return false;string? current=Path.GetDirectoryName(Path.GetFullPath(path));while(!string.IsNullOrEmpty(current)){if((File.GetAttributes(current)&FileAttributes.ReparsePoint)!=0)return false;string? parent=Path.GetDirectoryName(current);if(parent==current)break;current=parent;}return true;}catch{return false;}}
     static string? LocalArtwork(string root){foreach(string name in new[]{"cover.png","cover.jpg","folder.jpg","icon.png"}){string path=Path.Combine(root,name);if(File.Exists(path))return path;}return null;}
     public static IEnumerable<InstalledEntry> ParseEpic(string text){
         using var doc=JsonDocument.Parse(text,new JsonDocumentOptions{MaxDepth=32});var e=doc.RootElement;if(e.ValueKind!=JsonValueKind.Object)throw new InvalidDataException("Invalid Epic installation record.");
@@ -34,33 +42,42 @@ public static class GameLibraries {
             if(S(e,"install_path") is string path&&S(e,"title") is string title)yield return new("Legendary",app.Name,title,path);
         }
     }
+    public static InstalledEntry? ParseHoYoInstall(string biz,string path){
+        if(string.IsNullOrWhiteSpace(biz)||biz.Length>128||string.IsNullOrWhiteSpace(path)||!Path.IsPathRooted(path)||path.StartsWith(@"\\",StringComparison.Ordinal))return null;
+        string name=biz.ToLowerInvariant() switch{"hk4e_global" or "hk4e_cn"=>"Genshin Impact","hkrpg_global" or "hkrpg_cn"=>"Honkai: Star Rail","nap_global" or "nap_cn"=>"Zenless Zone Zero","bh3_global" or "bh3_cn"=>"Honkai Impact 3rd",_=>""};
+        return name.Length==0?null:new InstalledEntry("HoYoPlay",biz,name,path);
+    }
     // Registry records are data only: uninstall commands are never executed.
-    public static InstalledEntry? ClassifyUninstall(string key,string name,string? publisher,string? location,string? uninstall){
+    public static InstalledEntry? ClassifyUninstall(string key,string name,string? publisher,string? location,string? uninstall,string? displayIcon=null){
         if(string.IsNullOrWhiteSpace(location)||!Path.IsPathRooted(location)||location.StartsWith(@"\\",StringComparison.Ordinal)||!Directory.Exists(location)||string.IsNullOrWhiteSpace(name)||Regex.IsMatch(name,@"^(?:Battle\.net|Ubisoft Connect|Uplay|EA app|EA Desktop|Origin|GOG GALAXY|Riot Client|Amazon Games|Rockstar Games Launcher|Rockstar Games Social Club)(?:\s|$)",RegexOptions.IgnoreCase))return null;
         var bnet=Regex.Match(uninstall??"",@"Battle\.net.*?--uid=[""']?([A-Za-z0-9_]+)(?:[""'\s]|$)",RegexOptions.IgnoreCase);
         if(bnet.Success)return new("Battle.net",bnet.Groups[1].Value,name,location);
         string p=publisher??"";
-        if(p.Contains("Blizzard",StringComparison.OrdinalIgnoreCase)&&File.Exists(Path.Combine(location,".build.info")))return new("Battle.net",key,name,location);
-        if(p.Contains("GOG",StringComparison.OrdinalIgnoreCase)||key.StartsWith("GOG",StringComparison.OrdinalIgnoreCase))return new("GOG",key,name,location);
-        if(p.Contains("Electronic Arts",StringComparison.OrdinalIgnoreCase))return new("EA",key,name,location);
-        if(p.Contains("Ubisoft",StringComparison.OrdinalIgnoreCase))return new("Ubisoft",key,name,location);
+        string? icon=DisplayIconPath(displayIcon,location);
+        if(p.Contains("Blizzard",StringComparison.OrdinalIgnoreCase)&&File.Exists(Path.Combine(location,".build.info")))return new("Battle.net",key,name,location,icon);
+        if(p.Contains("GOG",StringComparison.OrdinalIgnoreCase)||key.StartsWith("GOG",StringComparison.OrdinalIgnoreCase))return new("GOG",key,name,location,icon);
+        if(p.Contains("Electronic Arts",StringComparison.OrdinalIgnoreCase))return new("EA",key,name,location,icon);
+        if(p.Contains("Ubisoft",StringComparison.OrdinalIgnoreCase))return new("Ubisoft",key,name,location,icon);
+        if(p.Contains("Kuro",StringComparison.OrdinalIgnoreCase)||key.Contains("KRInstall Wuthering Waves",StringComparison.OrdinalIgnoreCase))return new("Kuro",key,name,location,icon);
         if(p.Contains("Rockstar Games",StringComparison.OrdinalIgnoreCase))return new("Rockstar",key,name,location);
         if(p.Contains("Riot Games",StringComparison.OrdinalIgnoreCase))return new("Riot",key,name,location);
         if(p.Contains("Amazon Games",StringComparison.OrdinalIgnoreCase))return new("Amazon",key,name,location);
         return null;
     }
+    static string? DisplayIconPath(string? value,string root){if(string.IsNullOrWhiteSpace(value)||value.Length>4096)return null;string text=value.Trim().Trim('"');int comma=text.LastIndexOf(',');if(comma>0&&int.TryParse(text[(comma+1)..],out _))text=text[..comma].Trim().Trim('"');if(!Path.IsPathRooted(text)||text.StartsWith(@"\\",StringComparison.Ordinal))return null;try{string full=Path.GetFullPath(Environment.ExpandEnvironmentVariables(text));return File.Exists(full)&&SafeLocalFile(full)?full:null;}catch{return null;}}
     static IEnumerable<InstalledEntry> RegistryEntries(List<string> warnings){
         var entries=new List<InstalledEntry>();
         foreach(var hive in new[]{RegistryHive.LocalMachine,RegistryHive.CurrentUser})foreach(var view in new[]{RegistryView.Registry64,RegistryView.Registry32}){
             try{using var registry=RegistryKey.OpenBaseKey(hive,view);
+            if(hive==RegistryHive.CurrentUser)foreach(string baseKey in new[]{@"Software\miHoYo\HYP",@"Software\Cognosphere\HYP"})using(var hyp=registry.OpenSubKey(baseKey))if(hyp!=null)foreach(string version in hyp.GetSubKeyNames().Take(128))using(var versionKey=hyp.OpenSubKey(version))if(versionKey!=null)foreach(string biz in versionKey.GetSubKeyNames().Take(256))using(var gameKey=versionKey.OpenSubKey(biz)){string? path=gameKey?.GetValue("GameInstallPath") as string;if(string.IsNullOrWhiteSpace(path))continue;var entry=ParseHoYoInstall(biz,path);if(entry!=null)entries.Add(entry);}
             using(var uninstall=registry.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"))if(uninstall!=null)foreach(string key in uninstall.GetSubKeyNames().Take(MaxEntries)){
-                using var item=uninstall.OpenSubKey(key);if(item==null)continue;var entry=ClassifyUninstall(key,item.GetValue("DisplayName") as string??"",item.GetValue("Publisher") as string,item.GetValue("InstallLocation") as string,item.GetValue("UninstallString") as string);if(entry!=null)entries.Add(entry);
+                using var item=uninstall.OpenSubKey(key);if(item==null)continue;var entry=ClassifyUninstall(key,item.GetValue("DisplayName") as string??"",item.GetValue("Publisher") as string,item.GetValue("InstallLocation") as string,item.GetValue("UninstallString") as string,item.GetValue("DisplayIcon") as string);if(entry!=null)entries.Add(entry);
             }
             foreach(var spec in new[]{(Path:@"SOFTWARE\GOG.com\Games",Source:"GOG",Location:"path",Name:"gameName"),(Path:@"SOFTWARE\Ubisoft\Launcher\Installs",Source:"Ubisoft",Location:"InstallDir",Name:"DisplayName"),(Path:@"SOFTWARE\EA Games",Source:"EA",Location:"Install Dir",Name:"DisplayName")}){
                 using var index=registry.OpenSubKey(spec.Path);if(index==null)continue;foreach(string id in index.GetSubKeyNames().Take(MaxEntries)){
                     using var item=index.OpenSubKey(id);string? path=item?.GetValue(spec.Location) as string;if(string.IsNullOrEmpty(path)||!Path.IsPathRooted(path)||path.StartsWith(@"\\",StringComparison.Ordinal)||!Directory.Exists(path))continue;
                     string? label=item?.GetValue(spec.Name) as string;string name=string.IsNullOrWhiteSpace(label)?Path.GetFileName(Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar)):label;
-                    entries.Add(new(spec.Source,id,name,path));
+                    entries.Add(new(spec.Source,id,name,path,item?.GetValue("DisplayIcon") as string));
                 }
             }
             }catch(Exception error)when(error is IOException or UnauthorizedAccessException or System.Security.SecurityException){warnings.Add("Registered library records were only partly readable ("+hive+", "+view+").");}
@@ -72,7 +89,12 @@ public static class GameLibraries {
         string? name=xml.Descendants().FirstOrDefault(x=>x.Name.LocalName=="ShellVisuals")?.Attribute("DefaultDisplayName")?.Value;
         if(string.IsNullOrWhiteSpace(name)||name.StartsWith("ms-resource:",StringComparison.OrdinalIgnoreCase))name=Path.GetFileName(Path.GetDirectoryName(contentRoot));
         if(!xml.Descendants().Any(x=>x.Name.LocalName=="Executable"))yield break;
-        yield return new("Xbox",id,name??id,contentRoot);
+        string? icon=ResolveXboxLogo(xml,contentRoot);yield return new("Xbox",id,name??id,contentRoot,icon);
+    }
+    static string? ResolveXboxLogo(XDocument xml,string contentRoot){
+        var shell=xml.Descendants().FirstOrDefault(x=>x.Name.LocalName=="ShellVisuals");if(shell==null)return null;
+        foreach(string key in new[]{"Square150x150Logo","Square44x44Logo","StoreLogo"}){string? value=shell.Attribute(key)?.Value;if(string.IsNullOrWhiteSpace(value)||value.Length>512||Path.IsPathRooted(value)||value.Contains(".."))continue;string rel=value.Replace('/',Path.DirectorySeparatorChar).Replace('\\',Path.DirectorySeparatorChar);string basePath=Path.GetFullPath(Path.Combine(contentRoot,rel));string fullRoot=Path.GetFullPath(contentRoot)+Path.DirectorySeparatorChar;if(!basePath.StartsWith(fullRoot,StringComparison.OrdinalIgnoreCase))continue;string dir=Path.GetDirectoryName(basePath)!,stem=Path.GetFileNameWithoutExtension(basePath),ext=Path.GetExtension(basePath);try{foreach(string candidate in Directory.EnumerateFiles(dir,stem+".scale-*"+ext).Take(32).OrderByDescending(p=>int.TryParse(Regex.Match(Path.GetFileNameWithoutExtension(p),@"\.scale-(\d+)").Groups[1].Value,out int scale)?scale:0))if(SafeLocalFile(candidate))return candidate;}catch(IOException){}catch(UnauthorizedAccessException){}if(File.Exists(basePath)&&SafeLocalFile(basePath))return basePath;}
+        return null;
     }
     public static LibraryLocations DefaultLocations(){
         string pd=Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),user=Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),roaming=Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -102,7 +124,7 @@ public sealed class ManualGameStore(string root){
     string FilePath=>Path.Combine(root,"manual-games.json");
     public IReadOnlyList<SteamGame> Read(){if(!File.Exists(FilePath))return [];var records=JsonSerializer.Deserialize<List<SteamGame>>(GameLibraries.ReadMetadata(FilePath))??[];if(records.Count>1000)throw new InvalidDataException("Too many manual games.");foreach(var game in records){if(game.Source!="Manual"||game.AppId!=0||game.ManualExecutable==null||game.ExternalId!=Path.GetFullPath(game.ManualExecutable).ToUpperInvariant())throw new InvalidDataException("Invalid manual game record.");if(File.Exists(game.ManualExecutable))ValidateExecutable(game.ManualExecutable);if(!Path.GetDirectoryName(Path.GetFullPath(game.ManualExecutable))!.Equals(Path.GetFullPath(game.InstallDirectory),StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("Manual executable directory changed.");_=game.Key;}return records;}
     public static void ValidateExecutable(string executable){if(!Path.IsPathRooted(executable)||executable.StartsWith(@"\\",StringComparison.Ordinal)||!Path.GetExtension(executable).Equals(".exe",StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("Choose a local game .exe.");using var read=new BinaryReader(File.OpenRead(executable));if(read.BaseStream.Length<256||read.ReadUInt16()!=0x5a4d)throw new InvalidDataException("Not a Windows game executable.");read.BaseStream.Position=60;uint nt=read.ReadUInt32();if(nt>read.BaseStream.Length-26)throw new InvalidDataException("Invalid executable header.");read.BaseStream.Position=nt;if(read.ReadUInt32()!=0x4550||read.ReadUInt16()!=0x8664)throw new InvalidDataException("Only 64-bit Windows games are supported.");read.BaseStream.Position=nt+22;ushort characteristics=read.ReadUInt16();if((characteristics&2)==0||(characteristics&0x2000)!=0||read.ReadUInt16()!=0x20b)throw new InvalidDataException("Choose a 64-bit game executable, not a DLL.");}
-    public SteamGame Add(string executable,string? title=null){ValidateExecutable(executable);string exe=Path.GetFullPath(executable),folder=Path.GetDirectoryName(exe)!;var game=new SteamGame(0,string.IsNullOrWhiteSpace(title)?Path.GetFileNameWithoutExtension(exe):title.Trim(),folder,null,Source:"Manual",ExternalId:exe.ToUpperInvariant(),ManualExecutable:exe);_=game.Key;var games=Read().Where(g=>g.Key!=game.Key).Append(game).ToArray();Save(games);return game;}
+    public SteamGame Add(string executable,string? title=null){ValidateExecutable(executable);string exe=Path.GetFullPath(executable),folder=Path.GetDirectoryName(exe)!;var game=new SteamGame(0,string.IsNullOrWhiteSpace(title)?Path.GetFileNameWithoutExtension(exe):title.Trim(),folder,null,DetectedExecutable:exe,Detected:true,Icon:GameIconResolver.FromExecutable(exe),Source:"Manual",ExternalId:exe.ToUpperInvariant(),ManualExecutable:exe);_=game.Key;var games=Read().Where(g=>g.Key!=game.Key).Append(game).ToArray();Save(games);return game;}
     public void Remove(string key){Save(Read().Where(g=>g.Key!=key).ToArray());}
     void Save(IReadOnlyList<SteamGame> games){Directory.CreateDirectory(root);string temp=FilePath+"."+Guid.NewGuid().ToString("N")+".pending";try{File.WriteAllText(temp,JsonSerializer.Serialize(games));File.Move(temp,FilePath,true);}finally{if(File.Exists(temp))File.Delete(temp);}}
 }

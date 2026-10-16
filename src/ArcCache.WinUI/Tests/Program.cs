@@ -5,7 +5,83 @@ int passed=0;
 void Check(bool yes,string message){if(!yes)throw new Exception(message);}
 void Test(string name,Action body){body();passed++;Console.WriteLine("PASS "+name);}
 void Reject(Action body){try{body();}catch(InvalidDataException){return;}throw new Exception("Expected rejection.");}
+Check(GraphicsPageState.StateTable.Select(r=>r.Key).Distinct(StringComparer.Ordinal).Count()==GraphicsPageState.StateTable.Count,"Graphics preview keys must be unique.");
+foreach(var row in GraphicsPageState.StateTable) Test("Graphics state table: "+row.Name,()=>{
+ var state=GraphicsPageState.Resolve(row.Input);
+ Check(state.CurrentStep==row.Step,$"Expected step {row.Step}, got {state.CurrentStep}.");
+ Check(state.PrimaryAction==row.Action,$"Expected accent action {row.Action}, got {state.PrimaryAction}.");
+ Check(state.AccentButton==row.AccentButton,$"Expected accent button '{row.AccentButton}', got '{state.AccentButton}'.");
+ Check(state.ShowAmberDriverNote==row.Amber,$"Amber-note state mismatch for {row.Name}.");
+ Check(state.ShowFinish==row.Ready,$"Finish state mismatch for {row.Name}.");
+ Check(state.ReadyForGames==(state.Step2Complete&&(row.Input.Driver==GraphicsDriverState.Checked||row.Input.ControlCopyPassed)),"My games readiness must follow the 512 control, Windows setting and the reviewed-driver status.");
+ Check(new[]{state.Step1Expanded,state.Step2Expanded,state.Step3Expanded}.Count(x=>x)<=1,"More than one setup step is expanded.");
+ Check(state.ShowFinish==(state.PrimaryAction==GraphicsPrimaryAction.ChooseGame),"Finish button and finish state disagree.");
+ if(row.Input.Check is GraphicsCheckState.NotRun or GraphicsCheckState.Running)Check(state.HomeTitle=="Checking your graphics…","Home must stay in the checking state until the graphics check finishes.");
+ if(row.Action==GraphicsPrimaryAction.ChooseGame)Check(state.AccentButton=="Choose a game"&&state.FinishText=="Ready. Choose a game.","The finish heading and next-action button must use different wording.");
+ if(row.Input.Check==GraphicsCheckState.Failed)Check(!state.ShowCheckAgainLink&&state.AccentButton!="","A failed check must offer an accent retry, not a check-again link.");
+ if(row.Input.Check==GraphicsCheckState.Passed&&row.Input.Driver!=GraphicsDriverState.Changed&&row.Input.Windows!=GraphicsWindowsState.Error&&!row.Input.MultipleChips)Check(state.ShowCheckAgainLink,"A completed check must offer only a small Check again link.");
+ if(row.Key=="fresh-check")Check(state.Step1Result=="Checking graphics chip…"&&state.Step1Body==""&&state.Step2Result=="Waiting for step 1"&&state.Step3Result=="Waiting for step 1","The fresh check must show only its spinner/status and keep later steps waiting.");
+ if(row.Key=="no-intel-chip")Check(state.Step1Result=="No Intel graphics found"&&state.Step1Body.Contains("Intel Arc or Xe")&&state.ShowCheckAgainLink&&state.Step2Result=="Waiting for step 1"&&state.Step3Result=="Waiting for step 1","No-Intel state must explain the requirement and keep later steps waiting.");
+ if(row.Key is "windows-setting-off" or "restart-pending" or "windows-state-unreadable" or "setting-restored")Check(!state.Step3Complete&&state.Step3Result=="Waiting for step 2","Step 3 cannot appear complete while step 2 is unfinished.");
+ if(row.Key=="setting-restored")Check(state.Step2Body.StartsWith("Previous Windows setting restored.",StringComparison.Ordinal),"Restored Windows setting must be identified in step 2.");
+ if(row.Key=="test-running")Check(state.ShowStopTest&&state.CopyTestProgress==42&&state.CopyTestStage.Contains("temporary driver copy"),"Running test must expose stage, progress, and stop action.");
+ if(row.Key is "test-failed" or "test-stopped")Check(state.PrimaryAction==GraphicsPrimaryAction.TestDriverCopy&&state.AccentButton=="Test again","A failed or stopped test must offer a retry.");
+ if(row.Key=="unsupported-file")Check(state.ShowUpdateDriverLink&&state.Step3Body.Contains("Update the Intel graphics driver"),"Unsupported driver state must explain a recovery path.");
+ if(row.Key=="multiple-chips")Check(state.Step1Expanded&&state.ShowChipPicker&&state.PrimaryAction==GraphicsPrimaryAction.CheckSelectedChip&&state.Step2Result=="Waiting for step 1","Multiple-chip state must ask which chip to check.");
+ if(row.Name.StartsWith("B580",StringComparison.Ordinal)){Check(state.Step3Complete&&state.ShowAmberDriverNote&&state.Warning=="Not pre-reviewed by Arc Cache · passed its test on this PC","Passed unchecked-driver state lost its amber note.");Check(state.CacheSizes=="Default, 1 GB"&&state.Step3Result.Contains("Default, 1 GB"),"Cache sizes do not match this driver's capability list.");}
+ if(row.Name=="long graphics names")Check(state.Step1Result.Contains("unusually long adapter name")&&state.Step1Result.Contains("32.0.101.9150.12345"),"Long graphics identity was dropped from the state model.");
+});
+foreach(var row in GraphicsPageState.ReadinessStateTable)Test("Graphics/My games readiness: "+row.Key,()=>{
+ var state=GraphicsPageState.Resolve(row.Input);
+ Check(state.ReadyForGames==row.ReadyForGames,$"Unexpected My games readiness for {row.Key} with selected test size {row.Input.SelectedTrialMiB} MiB.");
+ if(row.Key=="selected-size-passed-control-not-passed")Check(!state.ShowFinish&&state.Step3Result=="Default driver copy needs its test"&&state.PrimaryAction==GraphicsPrimaryAction.TestDriverCopy,"A larger-size pass without the unchanged control must not show a contradictory ready state.");
+});
+Test("Automatic game polling does not flash Checking or rerender unchanged results",()=>{
+ Check(!GamePollPolicy.ShouldRender(MyGamesLoadResult.Unknown,MyGamesLoadResult.Unknown),"Repeated background observations must not rerender My games.");
+ Check(GamePollPolicy.ShouldRender(MyGamesLoadResult.Unknown,MyGamesLoadResult.DriverCopyLoaded),"A changed observation must update the page.");
+ Check(GamePollPolicy.ShouldStop("The game is not running."),"Polling must stop when the game is not running.");
+ Check(!GamePollPolicy.ShouldStop("Loaded driver observed."),"A live game observation must not stop before it is classified.");
+});
 GameLibraryTests.Run(Test,Check);
+Check(MyGamesPageStates.StateTable.Select(r=>r.Key).Distinct(StringComparer.Ordinal).Count()==MyGamesPageStates.StateTable.Count,"My games preview keys must be unique.");
+foreach(var row in MyGamesPageStates.StateTable)Test("My games state table: "+row.Name,()=>{
+ var state=MyGamesPageStates.Resolve(row.Input);
+ Check(state.Key==row.Key,$"Expected state {row.Key}, got {state.Key}.");
+ Check(state.AccentAction==row.Accent,$"Expected accent action {row.Accent}, got {state.AccentAction}.");
+ Check(state.ExpandedStep is >=0 and <=3,"Expanded step is outside the three-step flow.");
+ Check(state.ExpandedStep==0||state.ExpandedStep==1||state.ExpandedStep==2||state.ExpandedStep==3,"Invalid expanded step.");
+ if(state.ShowProgress)Check(state.AccentAction==MyGamesAction.None&&state.AccentButton=="","A running step must show progress without an accent action.");
+ if(row.Key=="setup-running")Check(!state.ShowStop,"Setup copy creation must not offer a stop button when it cannot be canceled safely.");
+ if(row.Key is "first-check-running" or "size-check-running")Check(state.ShowStop,"A running launch check must offer Stop.");
+ if(row.Key=="problem-normal-driver"||row.Key=="problem-size-normal-driver")Check(state.AccentButton=="Launch again","Normal-driver recovery must use the plain Launch again action.");
+ if(row.Key=="not-set-up")Check(state.AccentButton=="Set up this game"&&state.Step1Body.Contains("Default-size"),"Initial setup must create the unchanged Default copy first.");
+ if(row.Key=="size-apply-pending")Check(state.ExpandedStep==3&&state.AccentButton=="Apply 1 GB"&&state.Step1Complete&&state.Step2Complete,"Cache size must unlock after the first launch check.");
+ if(row.Key=="size-launch-waiting")Check(state.ExpandedStep==3&&state.AccentButton==row.Input.LaunchLabel&&state.Step1Complete&&state.Step2Complete,"A non-default size must require a final launch confirmation.");
+ if(row.Key=="default-verified")Check(state.HeaderStatus=="Ready to play · Default"&&state.AccentButton==row.Input.LaunchLabel,"Default verified header/action mismatch.");
+ if(row.Key=="size-verified")Check(state.HeaderStatus=="Ready to play · 1 GB"&&state.Step3Complete,"Verified cache size state mismatch.");
+ if(row.Key=="default-verified")Check(row.Input.CacheSize=="Default"&&state.ShowSizeChoices&&state.AccentAction==MyGamesAction.Launch,"Default verified must show the applied Default selection and no Apply action.");
+ if(row.Key=="profile-not-found")Check(state.HeaderStatus==state.Step1Result&&state.AccentAction==MyGamesAction.LaunchForDiscovery&&state.Step1Body.Contains("Start the game once in DirectX 12"),"Undetected games must offer discovery with matching status text.");
+ if(row.Key=="no-selection")Check(state.AccentAction==MyGamesAction.None,"No selection must not offer a useless Choose game action.");
+ if(row.Key=="dx12-unavailable")Check(state.ListBadge=="No DirectX 12"&&state.AccentAction==MyGamesAction.None,"A game without DirectX 12 must explain the limit without a dead-end action.");
+ if(row.Key=="game-uninstalled")Check(state.ListBadge=="Not installed","Uninstalled games need a specific list badge.");
+ if(row.Key=="blocked-by-another-mod")Check(state.HeaderStatus=="Blocked by another mod"&&state.ListBadge=="Blocked"&&!state.ShowGameFlow&&state.AccentAction==MyGamesAction.OpenGameFolder&&state.AccentButton=="Open game folder"&&state.Warning!.Contains("OptiScaler")&&state.Warning.Contains(row.Input.ModBlocker!.Path)&&state.Warning.Contains("combining both can crash")&&state.Warning.Contains("Remove or disable the mod, then check again"),"A local DirectX proxy must have a clear blocked state, identity, path and recovery action.");
+ if(row.Key=="setup-needs-attention")Check(state.HeaderStatus=="Setup needs attention"&&state.ListBadge=="Needs attention"&&!state.ShowGameFlow&&!state.ShowSizeChoices&&!state.ShowSizeApply&&state.AccentAction==MyGamesAction.RestoreGame&&state.AccentButton=="Use default settings"&&state.Warning!.Contains("doesn't match the current game files")&&!state.Warning.Contains(row.Input.DiscoveryMessage!),"A saved setup whose game profile no longer matches must explain the safe next step without presenting the raw DX12 discovery instruction as current advice.");
+ if(row.Key=="size-verified-after-close"){
+  var effective=MyGamesPageStates.EffectiveLoadResult(MyGamesLoadResult.Unknown,true,16384,"size-loading-verified");
+  Check(effective==MyGamesLoadResult.DriverCopyLoaded&&state.Key=="size-verified-after-close"&&state.HeaderStatus=="Ready to play · 16 GB","A persisted successful size check must remain verified after closing the game or restarting Arc Cache.");
+  var running=MyGamesPageStates.WhileGameRunning(state);
+  Check(!running.ShowSizeChoices&&!running.ShowSizeApply&&running.AccentAction==MyGamesAction.None&&running.Warning!.Contains("Close it to change the cache size"),"While the game runs, hide cache-size actions and explain why.");
+ }
+ if(row.Key=="size-retest-required")Check(state.HeaderStatus=="Retest this size"&&state.AccentAction==MyGamesAction.OpenGraphics&&state.Warning!.Contains("older app version")&&state.Warning.Contains("default settings under Advanced"),"Old large-size test must give a clear retest path and preserve the default-settings recovery path.");
+ if(row.Key=="problem-recovery")Check(!state.ShowGameFlow&&state.Warning is not null,"Recovery state must show its reason without placeholder setup steps.");
+ if(row.Key is "problem-normal-driver" or "problem-size-normal-driver")Check((state.Step2Body+state.Step3Body).Contains("Make sure the game starts in DirectX 12"),"Normal-driver result needs a specific one-line fix.");
+ if(row.Key=="setup-running")Check(state.ExpandedStep==1&&state.ProgressText.StartsWith("Step 1 of 3"),"Setup progress must belong to the running first step.");
+ if(row.Key=="size-check-running")Check(state.ExpandedStep==3&&state.ShowStop&&state.ProgressText.StartsWith("Step 3 of 3"),"Size-check progress and Stop must belong to step 3.");
+});
+Test("Trial setup requires game observed with tested driver copy",()=>{
+ var state=MyGamesPageStates.Resolve(new(RequiresTrialProfile:true,TrialProfileFound:false,ProfileFound:true));
+ Check(state.Key=="trial-profile-not-found"&&state.AccentAction==MyGamesAction.LaunchForDiscovery&&!state.ShowSetupAction,"A stock-driver profile must not expose setup before the tested driver copy has been observed.");
+});
 Test("Introduction is shown for a new profile, stays dismissed across updates, and recovers invalid preferences",()=>{
  string root=Path.Combine(Path.GetTempPath(),"ArcWelcomeTest-"+Guid.NewGuid());
  try{var intro=new Introduction(root);Check(intro.ShouldShow,"New profile skipped introduction.");intro.Dismiss();Check(!new Introduction(root).ShouldShow,"Dismissal did not persist.");File.WriteAllText(Path.Combine(root,"introduction-version.txt"),"invalid");Check(new Introduction(root).ShouldShow,"Invalid preference hid introduction.");Check(Introduction.Screens.Length==1&&Introduction.Screens[0].Body.Contains("own copy")&&Introduction.Screens[0].Body.Contains("cache limit"),"Introduction does not explain the game-specific setup.");}finally{if(Directory.Exists(root))Directory.Delete(root,true);}
@@ -35,6 +111,14 @@ Test("The guide provides one next action from discovery to playing and handles o
  state=state with{Receipt=receipt with{Status="original-control-loading-verified"}};Check(GameGuide.From(state,true,true,true,true).Action=="Apply","Verified game control does not lead to applying the size.");
  state=state with{Receipt=receipt with{MiB=1024}};Check(GameGuide.From(state,true,true,true,true).Title.Contains("ready to try")&&GameGuide.From(state,true,true,true,true).Action=="Launch","Patched game does not offer play.");
  Check(GameGuide.From(state,true,true,false,true).Action=="Restore","Older setup has no safe next action.");
+});
+Test("Games use the checked driver's per-size patch list",()=>{
+ var reviewed=new[]{512,1024,2048,4096,8192,16384}.ToDictionary(n=>n,n=>new DriverLimitCapability(n,true,"reviewed"));
+ Check(DriverLimitChoices.IsAvailable(4096,reviewed,false),"A game could not use a size qualified for its driver.");
+ Check(DriverLimitChoices.IsAvailable(4096,reviewed,true),"A passed size was incorrectly hidden because a game uses a private driver copy.");
+ var oneGiB=new[]{512,1024,2048,4096,8192,16384}.ToDictionary(n=>n,n=>new DriverLimitCapability(n,n<=1024,n<=1024?"tested":"not verified"));
+ Check(!DriverLimitChoices.IsAvailable(4096,oneGiB,false)&&DriverLimitChoices.Fallback(oneGiB,false)==512,"A one-gigabyte driver test exposed a larger size or poor fallback.");
+ Check(DriverLimitChoices.Fallback(new Dictionary<int,DriverLimitCapability>(),false)==512,"No-capability fallback must be the unchanged Default size.");
 });
 Test("Plain game checks distinguish an observed copy from cache performance",()=>{
     string exe=@"C:\Games\Example\game.exe";
@@ -141,6 +225,60 @@ Test("SCSKiller bridge uses selected Steam ID, child-only Intel opt-in and no sh
     Check(command.ArgumentList.SequenceEqual(new[]{"compile","steam:292030","--community"})&&!command.UseShellExecute&&command.RedirectStandardInput&&command.Verb=="","Unexpected bridge command or escalation.");
     Check(command.Environment["SCSKILLER_EXPERIMENTAL_INTEL"]=="1","Missing explicit child opt-in.");
     bool rejected=false;try{ScsKillerBridge.Command(command.FileName,"record",292030);}catch(ArgumentException){rejected=true;}Check(rejected,"Recorder installation must not be exposed through bridge.");
+});
+Test("SCSKiller options, progress lines and build support are read correctly",()=>{
+    var tuned=ScsKillerBridge.Command(Path.Combine(Path.GetTempPath(),"scskiller.exe"),"compile",1,null,new ScsKillerOptions(8,true,false));
+    Check(tuned.ArgumentList.SequenceEqual(new[]{"compile","steam:1","--threads","8","--idle"}),"Compile options were not passed: "+string.Join(" ",tuned.ArgumentList));
+    var status=ScsKillerBridge.Command(Path.Combine(Path.GetTempPath(),"scskiller.exe"),"status",1,null,new ScsKillerOptions(8,true,true));
+    Check(status.ArgumentList.SequenceEqual(new[]{"status","steam:1","--community"}),"Status took compile-only options.");
+    var warming=ScsKillerBridge.ParseProgress("SCSKiller: 20:19:35 steam:1623730 Warming 1200/94165 (3 failed) 450/s");
+    Check(warming is {Stage:"Warming",Done:1200,Total:94165}&&warming.Detail.Contains("450/s"),"Warming progress was not parsed.");
+    Check(ScsKillerBridge.ParseProgress("20:19:15 steam:1623730 Indexing") is {Stage:"Indexing",Total:0},"Stage-only line was not parsed.");
+    Check(ScsKillerBridge.ParseProgress("SCSKiller log:   plan: 94165 PSOs")==null,"A log line was read as progress.");
+    var arc=ScsKillerBridge.Describe("C:\\x\\scskiller.exe","","Arc Cache's SCSKiller",0,"{\"tool\":\"SCSKiller-Arc\",\"version\":\"0.0.0-internal.0+f3acf3968a6e\",\"arcCacheHandoff\":1,\"warm\":\"w\",\"warmDriverLocal\":true}\n");
+    Check(arc.PrivateDriverSupport&&arc.Version=="development build f3acf39","Arc Cache's SCSKiller was not recognised: "+arc.Version);
+    var oldWarm=ScsKillerBridge.Describe("x","","Installed SCSKiller",0,"{\"arcCacheHandoff\":1,\"version\":\"1.2.5\",\"warmDriverLocal\":false}");
+    Check(!oldWarm.PrivateDriverSupport&&oldWarm.Note.Contains("scskiller_warm"),"An old warm exe was accepted for driver copies.");
+    var upstream=ScsKillerBridge.Describe("x","1.3.0-beta.2","Portable SCSKiller",1,"error: unknown command 'arc-cache-info'");
+    Check(!upstream.PrivateDriverSupport&&upstream.Version=="1.3.0-beta.2"&&upstream.Note.Contains("Default only"),"An official build was accepted for driver copies.");
+    Check(ScsKillerBridge.Origin(@"C:\Users\Nick\Desktop\scskiller-1.3.0-beta.2-portable\current\cli\scskiller.exe")=="Portable SCSKiller","Portable build not named.");
+    string settings=Path.Combine(Path.GetTempPath(),"ArcScsOptions-"+Guid.NewGuid().ToString("N")+".json");
+    try{new ScsKillerBridge(settings).SaveOptions(new ScsKillerOptions(4,true,false));var loaded=new ScsKillerBridge(settings).Load().Options;Check(loaded==new ScsKillerOptions(4,true,false),"Options were not kept.");}
+    finally{File.Delete(settings);}
+});
+Test("Intel cache files are linked to a game only when one file clearly grew",()=>{
+    string a=new string('a',64),b=new string('b',64),c=new string('c',64);
+    var before=new Dictionary<string,long>{[a]=100L<<20,[b]=5L<<20};
+    Check(CacheFileMap.Attribute(before,new Dictionary<string,long>{[a]=900L<<20,[b]=6L<<20})==a,"The growing file was not linked.");
+    Check(CacheFileMap.Attribute(before,new Dictionary<string,long>{[a]=101L<<20,[b]=5L<<20,[c]=40L<<20})==c,"A new file was not linked.");
+    Check(CacheFileMap.Attribute(before,new Dictionary<string,long>{[a]=200L<<20,[b]=60L<<20})==null,"Two growing files were linked anyway.");
+    Check(CacheFileMap.Attribute(before,before)==null,"Nothing grew but a file was linked.");
+    Check(!CacheFileMap.IsCacheName("..\\x")&&CacheFileMap.IsCacheName(a),"Cache file names are not validated.");
+    string root=Path.Combine(Path.GetTempPath(),"ArcCacheFiles-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
+    try{
+        File.WriteAllBytes(Path.Combine(root,a),new byte[3]);File.WriteAllText(Path.Combine(root,"notes.txt"),"x");
+        var snap=CacheFileMap.Snapshot(root);Check(snap.Count==1&&snap[a]==3&&CacheFileMap.CurrentBytes(a,root)==3,"Snapshot read other files or wrong sizes.");
+        var map=new CacheFileMap(Path.Combine(root,"cache-files.json"));map.Remember(@"D:\Games\Palworld-Win64-Shipping.exe",a,3,"test");
+        Check(new CacheFileMap(Path.Combine(root,"cache-files.json")).For(@"E:\Other\PALWORLD-Win64-Shipping.exe")?.File==a,"The link is not kept per exe name.");
+        Check(new CacheFileMap(Path.Combine(root,"cache-files.json")).For(@"D:\Games\Other.exe")==null,"Another game got the link.");
+    }finally{Directory.Delete(root,true);}
+});
+Test("SCSKiller private driver handoff is compile-only and requires matching loaded-module evidence",()=>{
+    string root=Path.Combine(Path.GetTempPath(),"ArcCache warm handoff");string exe=Path.Combine(root,"game.exe");
+    var handoff=new PrivateDriverWarm(exe,exe+".local",4096,"igd12um64xe2.dll",new string('A',64));
+    string? oldDir=Environment.GetEnvironmentVariable("SCSKILLER_ARCCACHE_PRIVATE_DRIVER_DIR");
+    try{Environment.SetEnvironmentVariable("SCSKILLER_ARCCACHE_PRIVATE_DRIVER_DIR",exe+".local");var normal=ScsKillerBridge.Command(Path.Combine(root,"scskiller.exe"),"compile",1);Check(!normal.Environment.ContainsKey("SCSKILLER_ARCCACHE_PRIVATE_DRIVER_DIR"),"Default compile unexpectedly inherited a caller-provided private path.");}
+    finally{Environment.SetEnvironmentVariable("SCSKILLER_ARCCACHE_PRIVATE_DRIVER_DIR",oldDir);}
+    var privateRun=ScsKillerBridge.Command(Path.Combine(root,"scskiller.exe"),"compile",1,handoff);
+    Check(privateRun.Environment["SCSKILLER_ARCCACHE_CACHE_MIB"]=="4096"&&privateRun.Environment["SCSKILLER_ARCCACHE_DRIVER_SHA256"]==new string('A',64),"Private handoff fields were not passed to the child only.");
+    string path=Path.Combine(root,"stage-1","game.exe.local","igd12um64xe2.dll");string encoded=Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(path));
+    Check(ScsKillerBridge.HasVerifiedPrivateDriverEvidence(new[]{"SCSKiller log: ARC_CACHE_DRIVER_LOADED|"+encoded+"|igd12um64xe2.dll|"+new string('A',64)+"|4096"},handoff),"Matching private driver load evidence was rejected.");
+    Check(!ScsKillerBridge.HasVerifiedPrivateDriverEvidence(new[]{"ARC_CACHE_DRIVER_LOADED|"+encoded+"|igd12um64xe2.dll|"+new string('B',64)+"|4096"},handoff),"Wrong loaded hash was accepted.");
+    string stock=Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(@"C:\Windows\System32\igd12um64xe2.dll"));
+    Check(!ScsKillerBridge.HasVerifiedPrivateDriverEvidence(new[]{"ARC_CACHE_DRIVER_LOADED|"+stock+"|igd12um64xe2.dll|"+new string('A',64)+"|4096"},handoff),"Normal system-driver path was accepted as a private-copy load.");
+    bool statusRejected=false;try{ScsKillerBridge.Command(Path.Combine(root,"scskiller.exe"),"status",1,handoff);}catch(ArgumentException){statusRejected=true;}Check(statusRejected,"Status command accepted a private driver handoff.");
+    bool sizeRejected=false;try{ScsKillerBridge.Command(Path.Combine(root,"scskiller.exe"),"compile",1,handoff with{CacheMiB=512});}catch(ArgumentException){sizeRejected=true;}Check(sizeRejected,"Unsupported private cache size was accepted.");
+    bool nameRejected=false;try{ScsKillerBridge.Command(Path.Combine(root,"scskiller.exe"),"compile",1,handoff with{DriverFile="igd12um64xe99.dll"});}catch(ArgumentException){nameRejected=true;}Check(nameRejected,"Unknown Intel DLL family was accepted.");
 });
 Test("KeyValues comments, escaped paths and nested objects",()=>{
     string text="// comment\n\"libraryfolders\" { \"0\" { \"path\" \"D:\\\\SteamLibrary\" } \"1\" { \"path\" \"E:\\\\Steam Games\" } }";

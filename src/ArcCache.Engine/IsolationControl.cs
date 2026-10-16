@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Linq;
+using System.Collections.Generic;
 using System.Security.Principal;
 using System.Web.Script.Serialization;
 using Microsoft.Win32;
@@ -16,9 +17,14 @@ public class PrivateCopyReceipt {
 }
 public static class IsolationControl {
     const string Key=@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options";
+    sealed class HashEntry {public long Length,WriteTicks;public string Hash;}
+    [ThreadStatic]static Dictionary<string,HashEntry> readOnlyHashCache;
+    sealed class HashCacheScope : IDisposable {readonly Dictionary<string,HashEntry> previous;public HashCacheScope(){previous=readOnlyHashCache;readOnlyHashCache=new Dictionary<string,HashEntry>(StringComparer.OrdinalIgnoreCase);}public void Dispose(){readOnlyHashCache=previous;}}
+    public static IDisposable BeginReadOnlyHashCache(){return new HashCacheScope();}
     public static string ReceiptPath {get{return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap","developer-override.json");}}
+    public static bool IsOverrideEnabled(){using(var root=RegistryKey.OpenBaseKey(RegistryHive.LocalMachine,RegistryView.Registry64))using(var key=root.OpenSubKey(Key)){return key!=null&&Convert.ToInt32(key.GetValue("DevOverrideEnable",0))==1;}}
     public static bool Administrator {get{using(var id=WindowsIdentity.GetCurrent())return new WindowsPrincipal(id).IsInRole(WindowsBuiltInRole.Administrator);}}
-    public static string FileHash(string path) {using(var s=File.OpenRead(path))using(var h=System.Security.Cryptography.SHA256.Create())return BitConverter.ToString(h.ComputeHash(s)).Replace("-","");}
+    public static string FileHash(string path) {string full=Path.GetFullPath(path);var info=new FileInfo(full);if(readOnlyHashCache!=null){HashEntry old;if(readOnlyHashCache.TryGetValue(full,out old)&&old.Length==info.Length&&old.WriteTicks==info.LastWriteTimeUtc.Ticks)return old.Hash;}string hash;using(var s=File.OpenRead(full))using(var h=System.Security.Cryptography.SHA256.Create())hash=BitConverter.ToString(h.ComputeHash(s)).Replace("-","");if(readOnlyHashCache!=null)readOnlyHashCache[full]=new HashEntry{Length=info.Length,WriteTicks=info.LastWriteTimeUtc.Ticks,Hash=hash};return hash;}
     static void Save<T>(string path,T receipt) {
         Directory.CreateDirectory(Path.GetDirectoryName(path));string tmp=path+".tmp";
         byte[] bytes=System.Text.Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(receipt));

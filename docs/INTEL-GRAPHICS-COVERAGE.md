@@ -8,18 +8,20 @@ Intel distinguishes Xe-LP (including Iris Xe), Xe-HPG (Arc A-series), Xe-LPG int
 
 ## Current support and verification
 
-| Driver path | Implemented | Not verified or unavailable |
-| --- | --- | --- |
-| Xe1 / reviewed xeh images, 9034 and 9150 | Separate original and 1 GiB checks; a 1 GiB game trial can follow passing checks | Positive A-series hardware/game test; 2/4/8/16 GiB definitions |
-| Xe2 / reviewed 9034 image | 1/2/4 GiB game presets; 8/16 GiB options for this exact image | Measured capacity and real reload above 4 GiB |
-| Newer Xe2 / candidate trial path | Original and 1 GiB checks; eligible files can continue to a 1 GiB game trial | General driver qualification and larger independently qualified patches |
-| Xe3 | Separate checks; reviewed 9034 constructor tests for 1/2/4 GiB; eligible files can continue to a 1 GiB game trial | Matching-hardware loading/game tests and 8/16 GiB reload patch |
-| Other integrated / Pro packages | Active Intel adapter discovery; checks where a supported driver file is present | Exact image qualification; older Xe-L and legacy HD/UHD patch support |
+Arc Cache no longer pins sizes to one reviewed driver image. For the installed `igd12um64xe*.dll` it locates the per-game cache constructor (and, for 4 GB and larger, the cache reload routine) by byte patterns that must match **exactly once**, checks that the original limit is 512 MiB, and builds the patched copy. A size is offered only after it passes the isolated test on the player's PC: an unchanged 512 MiB control and then the size itself, each creating real pipelines, writing a shader cache and reloading it with that driver copy.
 
-This table describes code paths, not universal support for every GPU in a family. No matching hardware is available here for positive Xe1/Xe3 tests. Older `igd12um64xel.dll` is not the same as the Xe1 xeh definition.
+| Family | Driver file | Sizes the patch supports | Hardware results |
+| --- | --- | --- | --- |
+| Xe2 (Arc B580/B570; Lunar Lake 140V/130V) | `igd12um64xe2.dll` | 1, 2 GB (constructor), 4, 8, 16 GB (constructor + chunked reload) | **Arc B580, 32.0.101.9150:** control and all sizes pass; Palworld and Ready or Not run at 16 GB |
+| Xe3 (Panther Lake Arc B370/B390) | `igd12um64xe3.dll` | 1–16 GB (same layout as Xe2; patterns match uniquely on 9150) | None yet; the on-PC test decides |
+| Xe1 (Arc A-series) | `igd12um64xeh.dll` | **1 GB only** | None yet. The Xe1 constructor differs: the wide store used for 2 GB and up would corrupt it, so those sizes are locked |
+| Xe-LPG, Xe-LP, older | – | none | Not supported |
+
+The driver file is taken from the adapter's active driver package and confirmed by the test run (which reports the file that actually loaded), not from the GPU's marketing name. After an Intel driver update, **Check support** inspects the new files; existing game setups keep using their own copy until you change them.
 
 ## Larger cache limits
 
-8/16 GiB are implemented only for the exact reviewed Xe2 32.0.101.9034 image in the unified preview. The patch changes the constructor limit, append budget and cache reload routine; its offsets cannot be reused for other images. Whole-file memory allocation remains. Large cache files can require approximately their size in additional RAM during loading. A configured ceiling does not immediately reserve that much memory.
-
-Actual cache capacity and reload with real cache files larger than 4 GiB remain unverified. No Xe1, Xe3, older Xe-L or legacy HD/UHD 8/16 GiB patch is enabled. Unknown or changed images cannot inherit a reviewed definition from branding or a similar constant.
+- 1 and 2 GB change only the constructor's limit (2 GB uses a wider store because the original instruction sign-extends).
+- 4, 8 and 16 GB additionally route the cache reload through a small wrapper that reads in 256 MiB chunks, because the original reload path can't read files of that size in one call. The wrapper has correct unwind data and is exercised by the reload pass of the size test.
+- A configured limit doesn't reserve memory or disk. The cache file grows as shaders are compiled. Loading a very large cache can need roughly its size in RAM.
+- Measured effect (Palworld, 16 GB): a SCSKiller compile with the driver copy kept 760.8 MB of shaders (the stock driver stops at 536.9 MB), and the next game start read them with only 2.3 MB of new compiles.
