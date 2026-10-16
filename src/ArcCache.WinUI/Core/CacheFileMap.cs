@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Runtime.InteropServices;
+using System.Text.Json;
 
 namespace ArcCache.Core;
 
@@ -48,6 +49,19 @@ public sealed class CacheFileMap(string path) {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         string temporary=path+".tmp";File.WriteAllText(temporary,JsonSerializer.Serialize(all,new JsonSerializerOptions{WriteIndented=true}));File.Move(temporary,path,true);
         return record;
+    }
+
+    /// <summary>The Intel cache file a running process has open, found with Windows' Restart Manager (which process uses
+    /// which file). Exact where the size heuristic can't be: a compile also fills the game's separate D3D11 cache file,
+    /// and other apps (browsers, Discord) keep their own files open. Null when the process holds none or several.</summary>
+    public static string? FileOpenBy(int pid,string? root=null) {
+        string? found=null;
+        foreach(string name in Snapshot(root).Keys){
+            if(!RestartManager.Holders(Path.Combine(root??IntelRoot,name)).Contains(pid))continue;
+            if(found!=null)return null;
+            found=name;
+        }
+        return found;
     }
 
     /// <summary>The file's current size, or null when it no longer exists.</summary>

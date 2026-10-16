@@ -427,7 +427,7 @@ public partial class MainWindow : Window {
                 }
                 // Keep polling while the game runs so the page notices when it closes.
                 if(GamePollPolicy.ShouldStop(message)||gameLoadResult is MyGamesLoadResult.NormalDriverLoaded)discoveryTimer.Stop();
-                else if(gameLoadResult==MyGamesLoadResult.DriverCopyLoaded&&ReceiptLoadVerified()){confirmedRunningExe=game.SupportedExecutable;lastLivenessCheck=DateTime.UtcNow;}
+                else if(gameLoadResult==MyGamesLoadResult.DriverCopyLoaded&&ReceiptLoadVerified()){confirmedRunningExe=game.SupportedExecutable;lastLivenessCheck=DateTime.UtcNow;await LinkCacheFileFromGame(game);}
                 if(saved||GamePollPolicy.ShouldRender(previous,gameLoadResult))RenderMyGames();
             }
             lastBackgroundError="";
@@ -638,6 +638,27 @@ public partial class MainWindow : Window {
     bool ReceiptLoadVerified()=>setupState?.Configured==true&&selectedReceipt is not null&&(selectedReceipt.MiB<=512?selectedReceipt.Status=="original-control-loading-verified":selectedReceipt.Status=="size-loading-verified");
     // By full path: SCSKiller's compile process runs under the game's exe name from its own folder and is not the game.
     // A process whose path can't be read (anti-cheat protected) counts as the game.
+    /// <summary>Links the Intel cache file the running game itself has open (Restart Manager): exact, unlike watching which
+    /// file grows. Runs once per game start, when its driver copy is confirmed.</summary>
+    async Task LinkCacheFileFromGame(SteamGame game){
+        if(cacheFiles==null||game.SupportedExecutable is not string exe)return;
+        try{
+            int? pid=GameProcessId(exe);if(pid==null)return;
+            string? file=await Task.Run(()=>CacheFileMap.FileOpenBy(pid.Value));if(file==null)return;
+            var current=cacheFiles.For(exe);if(current?.File==file)return;
+            var link=cacheFiles.Remember(exe,file,CacheFileMap.CurrentBytes(file)??0,"running game");
+            Log(current==null?$"Linked {game.Name} to Intel cache file {file[..8]}… ({Size(link.Bytes)}), the file the running game has open.":$"Corrected {game.Name}'s Intel cache file: the running game uses {file[..8]}… ({Size(link.Bytes)}), not {current.File[..8]}….");
+            RenderScsTool();
+        }catch(Exception e){Log("The game's Intel cache file could not be checked: "+e.Message);}
+    }
+    static int? GameProcessId(string executable){
+        string full=Path.GetFullPath(executable);
+        foreach(var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(full)))using(process){
+            try{if(string.Equals(process.MainModule?.FileName,full,StringComparison.OrdinalIgnoreCase))return process.Id;}
+            catch(Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException){}
+        }
+        return null;
+    }
     static bool GameProcessRunning(string? executable){
         if(string.IsNullOrWhiteSpace(executable))return false;
         try{
@@ -1216,7 +1237,10 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
                 Log(privateWarm==null?"SCSKiller completed with the normal Intel driver and Default cache size.":$"SCSKiller confirmed the {SetupPresentation.Limit(privateWarm.CacheMiB)} private driver copy loaded in its temporary compile process. Cache capacity is not measured.");
                 if(cacheBefore!=null&&game.SupportedExecutable is string exe&&action=="compile"){
                     var after=CacheFileMap.Snapshot();
-                    if(CacheFileMap.Attribute(cacheBefore,after) is string file&&cacheFiles!=null){var link=cacheFiles.Remember(exe,file,after[file],"SCSKiller compile");Log($"Linked {game.Name} to Intel cache file {file[..8]}… ({Size(link.Bytes)}).");}
+                    // A compile also fills the game's separate D3D11 cache file, so its size can't overrule a link that
+                    // exists: the exact link comes from the running game (LinkCacheFileFromGame). It only seeds a first one.
+                    if(cacheFiles?.For(exe) is {} existing&&CacheFileMap.CurrentBytes(existing.File) is not null)Log($"Kept this game's linked Intel cache file {existing.File[..8]}…; the running game confirms it.");
+                    else if(CacheFileMap.Attribute(cacheBefore,after) is string file&&cacheFiles!=null){var link=cacheFiles.Remember(exe,file,after[file],"SCSKiller compile");Log($"Linked {game.Name} to Intel cache file {file[..8]}… ({Size(link.Bytes)}).");}
                     else Log("Arc Cache couldn't tell which Intel cache file belongs to this game (no single file clearly grew).");
                 }
                 ShowProgress();ScsProgress.IsIndeterminate=false;ScsProgress.Value=100;ScsProgressText.Text="Done · "+ScsProgressText.Text.Replace("Compiling","compiled");

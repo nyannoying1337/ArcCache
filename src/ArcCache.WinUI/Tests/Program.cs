@@ -256,6 +256,18 @@ Test("Old session logs and overlay CSVs are pruned, nothing else",()=>{
     }finally{Directory.Delete(root,true);}
     Check(SafetyClient.QuickActions.Contains("ObserveGame")&&!SafetyClient.QuickActions.Contains("VerifySize")&&!SafetyClient.QuickActions.Contains("ChangeGameTrial"),"Only display requests may time out.");
 });
+Test("The cache file a process has open is found exactly, and none or several give no answer",()=>{
+    string root=Path.Combine(Path.GetTempPath(),"ArcOpenFiles-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
+    try{
+        string a=new string('a',64),b=new string('b',64);File.WriteAllBytes(Path.Combine(root,a),new byte[8]);File.WriteAllBytes(Path.Combine(root,b),new byte[8]);
+        Check(CacheFileMap.FileOpenBy(Environment.ProcessId,root)==null,"A file nobody has open was reported.");
+        using(var open=new FileStream(Path.Combine(root,b),FileMode.Open,FileAccess.Read,FileShare.ReadWrite)){
+            Check(CacheFileMap.FileOpenBy(Environment.ProcessId,root)==b,"The open cache file was not found.");
+            using var second=new FileStream(Path.Combine(root,a),FileMode.Open,FileAccess.Read,FileShare.ReadWrite);
+            Check(CacheFileMap.FileOpenBy(Environment.ProcessId,root)==null,"Two open files must give no answer.");
+        }
+    }finally{Directory.Delete(root,true);}
+});
 Test("Intel cache files are linked to a game only when one file clearly grew",()=>{
     string a=new string('a',64),b=new string('b',64),c=new string('c',64);
     var before=new Dictionary<string,long>{[a]=100L<<20,[b]=5L<<20};

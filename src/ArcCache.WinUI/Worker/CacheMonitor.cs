@@ -54,7 +54,7 @@ class CacheMonitor : Form {
     }
     internal Bitmap PreviewImage(){Sample();var image=new Bitmap(Width,Height);using(var g=Graphics.FromImage(image)){g.Clear(BackColor);TextRenderer.DrawText(g,text.Text,text.Font,new Rectangle(12,12,Width-24,Height-24),text.ForeColor,TextFormatFlags.WordBreak|TextFormatFlags.NoPadding);}return image;}
     string GameCacheLine(CacheSnapshot now) {
-        string name=cacheFile;string label="This game's cache file";
+        string name=ActiveFile;string label=detectedFile!=null&&cacheFile!=null&&!detectedFile.Equals(cacheFile,StringComparison.OrdinalIgnoreCase)?"This game's cache file (open in the game; the saved link was another file)":"This game's cache file";
         if(name==null){long best=0;foreach(var pair in now.Sizes){long old;long grew=pair.Value-(initial.Sizes.TryGetValue(pair.Key,out old)?old:0);if(grew>best){best=grew;name=pair.Key;}}label="Likely cache file (grew most)";if(name==null)return "This game's cache file: not linked yet (no file grew)";}
         long size;if(!now.Sizes.TryGetValue(name,out size))return label+": not found";
         long before;long grewSince=size-(initial.Sizes.TryGetValue(name,out before)?before:0);
@@ -65,7 +65,7 @@ class CacheMonitor : Form {
     // driver trims a file over 512 MiB, so a shrinking file means the private copy isn't in use; another file growing
     // much faster means the game is filling a different cache (another exe name). Read only: sizes, never contents.
     string CacheVerdict(CacheSnapshot now,string name,long size,long grewSince) {
-        if(cacheFile==null)return "Cache use: link this game's file first (Prepare shaders) for a verdict";
+        if(ActiveFile==null)return "Cache use: waiting until the game opens its cache file";
         long before;initial.Sizes.TryGetValue(name,out before);
         if(before>(512L<<20)+(1L<<20)&&size<before-(1L<<20))return "Cache use: WARNING - the file shrank; the normal 512 MB driver may have trimmed it";
         // The verdict follows the driver line above it: with the normal driver the larger limit does not apply at all.
@@ -77,6 +77,20 @@ class CacheMonitor : Form {
         if(grewSince<(32L<<20))return copyLoaded?"Cache use: GOOD - reading the prepared cache (only +"+Number(Math.Max(grewSince,0))+" new)":"Cache use: little new compiling (+"+Number(Math.Max(grewSince,0))+"), but the driver copy isn't confirmed";
         return "Cache use: the game is still adding shaders (+"+Number(grewSince)+") - normal for new areas";
     }
+    // The file the game itself has open (Restart Manager) beats the saved link: a compile also fills the game's separate
+    // D3D11 cache file, which can end up linked by mistake. Checked every 10 s until found.
+    string detectedFile;
+    string ActiveFile {get{return detectedFile??cacheFile;}}
+    void DetectOpenFile(CacheSnapshot now){
+        if(detectedFile!=null)return;string found=null;
+        foreach(string name in now.Sizes.Keys){
+            if(name.Length!=64)continue;
+            if(!OpenFiles.Holders(Path.Combine(root,name)).Contains(gamePid))continue;
+            if(found!=null)return; // several: keep the saved link
+            found=name;
+        }
+        detectedFile=found;
+    }
     void Sample() {
         long privateBytes=0,workingSet=0;
         try{using(var p=Process.GetProcessById(gamePid)){if(p.HasExited||p.StartTime!=started){Close();return;}privateBytes=p.PrivateMemorySize64;workingSet=p.WorkingSet64;
@@ -85,8 +99,32 @@ class CacheMonitor : Form {
         IntPtr front=GetForegroundWindow();uint foregroundPid;GetWindowThreadProcessId(front,out foregroundPid);Rect rect;
         if(foregroundPid==gamePid&&GetWindowRect(front,out rect)){Location=new Point(Math.Max(rect.Left,rect.Right-Width-18),rect.Top+42);if(!Visible)Show();}else if(Visible)Hide();
         var now=CacheSnapshot.Read(root);long growth=now.Bytes-initial.Bytes;int changed=now.ChangedSince(initial);
+        if(sampleCount%5==1)try{DetectOpenFile(now);}catch(Exception){}
         text.Text="Arc Cache · "+Path.GetFileNameWithoutExtension(executable)+"\r\n"+driverStatus+"\r\n"+GameCacheLine(now)+"\r\nAllocated memory: "+Number(privateBytes)+" · RAM in use: "+Number(workingSet)+"\r\nIntel cache (all apps): "+Number(now.Bytes)+"\r\nSize change: "+(growth>=0?"+":"")+Number(growth)+" · Changed files: "+changed+"\r\nUpdates every 2 seconds · files not readable: "+now.Unreadable+"";
         try{File.AppendAllText(log,DateTime.UtcNow.ToString("o")+","+gamePid+","+now.Bytes+","+growth+","+changed+","+now.Unreadable+","+privateBytes+","+workingSet+"\r\n");}catch(IOException){text.Text+="\r\nLogging unavailable";}catch(UnauthorizedAccessException){text.Text+="\r\nLogging unavailable";}
+    }
+}
+
+// Windows Restart Manager, read only: which processes have a file open.
+static class OpenFiles {
+    [StructLayout(LayoutKind.Sequential)] struct UniqueProcess {public int ProcessId;public System.Runtime.InteropServices.ComTypes.FILETIME StartTime;}
+    [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] struct ProcessInfo {public UniqueProcess Process;[MarshalAs(UnmanagedType.ByValTStr,SizeConst=256)] public string AppName;[MarshalAs(UnmanagedType.ByValTStr,SizeConst=64)] public string ServiceShortName;public int ApplicationType;public uint AppStatus;public uint TSSessionId;[MarshalAs(UnmanagedType.Bool)] public bool Restartable;}
+    [DllImport("rstrtmgr.dll",CharSet=CharSet.Unicode)] static extern int RmStartSession(out uint session,int flags,string key);
+    [DllImport("rstrtmgr.dll")] static extern int RmEndSession(uint session);
+    [DllImport("rstrtmgr.dll",CharSet=CharSet.Unicode)] static extern int RmRegisterResources(uint session,uint files,string[] names,uint processes,IntPtr uniqueProcesses,uint services,string[] serviceNames);
+    [DllImport("rstrtmgr.dll")] static extern int RmGetList(uint session,out uint needed,ref uint count,[In,Out] ProcessInfo[] info,ref uint rebootReasons);
+    public static List<int> Holders(string path){
+        var result=new List<int>();uint session;if(RmStartSession(out session,0,Guid.NewGuid().ToString("N"))!=0)return result;
+        try{
+            if(RmRegisterResources(session,1,new[]{path},0,IntPtr.Zero,0,null)!=0)return result;
+            for(int attempt=0;attempt<3;attempt++){
+                uint needed,count=0,reasons=0;int error=RmGetList(session,out needed,ref count,null,ref reasons);
+                if(error==0||error!=234||needed==0)return result;
+                var info=new ProcessInfo[needed];count=needed;
+                if(RmGetList(session,out needed,ref count,info,ref reasons)==0){for(int i=0;i<count;i++)result.Add(info[i].Process.ProcessId);return result;}
+            }
+            return result;
+        }finally{RmEndSession(session);}
     }
 }
 
