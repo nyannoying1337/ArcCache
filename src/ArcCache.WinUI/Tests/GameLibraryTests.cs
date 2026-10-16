@@ -56,6 +56,10 @@ public static class GameLibraryTests {
     var store=new ManualGameStore(Path.Combine(root,"manual"));var added=store.Add(exe,"My game");check(store.Read().Single().Key==added.Key&&added.Supported&&added.SupportedExecutable==exe,"Manual persistence or exact-executable detection failed.");store.Add(exe,"Renamed");check(store.Read().Count==1,"Manual duplicate added.");var launch=GameLaunch.For(added);check(launch.GameExecutable&&!launch.Protocol&&launch.Target==exe,"Manual launch plan is not exact selected executable.");
     File.Delete(exe);check(store.Read().Single().Key==added.Key,"Missing game lost its recovery identity.");store.Remove(added.Key);check(store.Read().Count==0,"Manual removal failed.");
     string bad=Path.Combine(game,"Bad.exe");File.WriteAllText(bad,"not a PE");Reject(()=>store.Add(bad));
+    File.WriteAllBytes(exe,pe);var kept=store.Add(exe,"Kept game");string file=Path.Combine(root,"manual","manual-games.json");
+    var raw=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(file))!.AsArray();var broken=raw[0]!.DeepClone();broken["Name"]="Broken";broken["ExternalId"]="WRONG";raw.Add(broken);File.WriteAllText(file,raw.ToJsonString());
+    var warnings=new List<string>();check(store.Read(warnings).Single().Key==kept.Key&&warnings.Count==1&&warnings[0].Contains("Broken"),"A broken manual entry hid the others or was not reported.");
+    store.Remove(kept.Key);check(System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(file))!.AsArray().Count==1,"Removing a game dropped the broken entry too.");
    });
    test("Malformed Epic metadata cannot hide other stores and duplicate records are stable",()=>{
     string manifests=Path.Combine(root,"manifests");Directory.CreateDirectory(manifests);File.WriteAllText(Path.Combine(manifests,"bad.item"),"not json");File.WriteAllText(Path.Combine(manifests,"array.item"),"[]");File.WriteAllText(Path.Combine(manifests,"good.item"),JsonSerializer.Serialize(new{AppName="app",DisplayName="Example",InstallLocation=game}));

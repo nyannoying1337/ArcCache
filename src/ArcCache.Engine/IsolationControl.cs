@@ -17,14 +17,39 @@ public class PrivateCopyReceipt {
 }
 public static class IsolationControl {
     const string Key=@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options";
-    sealed class HashEntry {public long Length,WriteTicks;public string Hash;}
+    internal sealed class HashEntry {public long Length,WriteTicks,CreationTicks;public string Hash;[System.Web.Script.Serialization.ScriptIgnore]public bool Fresh;}
     [ThreadStatic]static Dictionary<string,HashEntry> readOnlyHashCache;
     sealed class HashCacheScope : IDisposable {readonly Dictionary<string,HashEntry> previous;public HashCacheScope(){previous=readOnlyHashCache;readOnlyHashCache=new Dictionary<string,HashEntry>(StringComparer.OrdinalIgnoreCase);}public void Dispose(){readOnlyHashCache=previous;}}
     public static IDisposable BeginReadOnlyHashCache(){return new HashCacheScope();}
+    // Read-only checks (what the app shows, not what it changes) reuse hashes across worker processes: an entry counts
+    // only while the file's size, last write and creation time are unchanged. Every action that changes files, and the
+    // check before a game launch, hashes afresh.
+    public static string HashCachePath {get{return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap","hash-cache.json");}}
+    const int HashCacheLimit=4096;
+    sealed class PersistentHashCacheScope : IDisposable {
+        readonly Dictionary<string,HashEntry> previous;readonly string path;readonly int loaded;
+        public PersistentHashCacheScope(string file){
+            previous=readOnlyHashCache;path=file;var entries=new Dictionary<string,HashEntry>(StringComparer.OrdinalIgnoreCase);
+            try{if(File.Exists(path)&&new FileInfo(path).Length<=4*1024*1024){var saved=new JavaScriptSerializer{MaxJsonLength=8*1024*1024}.Deserialize<Dictionary<string,HashEntry>>(File.ReadAllText(path));if(saved!=null)foreach(var e in saved)if(e.Value!=null&&e.Value.Hash!=null&&e.Value.Hash.Length==64)entries[e.Key]=e.Value;}}catch(Exception e){if(!(e is IOException||e is UnauthorizedAccessException||e is ArgumentException||e is InvalidOperationException))throw;entries.Clear();}
+            loaded=entries.Count;readOnlyHashCache=entries;
+        }
+        public void Dispose(){
+            var entries=readOnlyHashCache;readOnlyHashCache=previous;if(entries==null||!entries.Values.Any(e=>e.Fresh))return;
+            try{
+                var keep=entries.Count<=HashCacheLimit?entries:entries.Where(e=>e.Value.Fresh).Take(HashCacheLimit).ToDictionary(e=>e.Key,e=>e.Value,StringComparer.OrdinalIgnoreCase);
+                Directory.CreateDirectory(Path.GetDirectoryName(path));string tmp=path+"."+Guid.NewGuid().ToString("N")+".tmp";
+                File.WriteAllText(tmp,new JavaScriptSerializer{MaxJsonLength=8*1024*1024}.Serialize(keep));
+                try{if(File.Exists(path))File.Replace(tmp,path,null);else File.Move(tmp,path);}finally{if(File.Exists(tmp))File.Delete(tmp);}
+            }catch(Exception e){if(!(e is IOException||e is UnauthorizedAccessException))throw;}
+        }
+    }
+    public static IDisposable BeginPersistentHashCache(string file=null){return new PersistentHashCacheScope(file??HashCachePath);}
+    // SHA256Cng uses Windows CNG (with the CPU's SHA instructions); SHA256.Create() is the much slower managed one on .NET Framework.
+    internal static System.Security.Cryptography.HashAlgorithm NewSha256(){return new System.Security.Cryptography.SHA256Cng();}
     public static string ReceiptPath {get{return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap","developer-override.json");}}
     public static bool IsOverrideEnabled(){using(var root=RegistryKey.OpenBaseKey(RegistryHive.LocalMachine,RegistryView.Registry64))using(var key=root.OpenSubKey(Key)){return key!=null&&Convert.ToInt32(key.GetValue("DevOverrideEnable",0))==1;}}
     public static bool Administrator {get{using(var id=WindowsIdentity.GetCurrent())return new WindowsPrincipal(id).IsInRole(WindowsBuiltInRole.Administrator);}}
-    public static string FileHash(string path) {string full=Path.GetFullPath(path);var info=new FileInfo(full);if(readOnlyHashCache!=null){HashEntry old;if(readOnlyHashCache.TryGetValue(full,out old)&&old.Length==info.Length&&old.WriteTicks==info.LastWriteTimeUtc.Ticks)return old.Hash;}string hash;using(var s=File.OpenRead(full))using(var h=System.Security.Cryptography.SHA256.Create())hash=BitConverter.ToString(h.ComputeHash(s)).Replace("-","");if(readOnlyHashCache!=null)readOnlyHashCache[full]=new HashEntry{Length=info.Length,WriteTicks=info.LastWriteTimeUtc.Ticks,Hash=hash};return hash;}
+    public static string FileHash(string path) {string full=Path.GetFullPath(path);var info=new FileInfo(full);if(readOnlyHashCache!=null){HashEntry old;if(readOnlyHashCache.TryGetValue(full,out old)&&old.Length==info.Length&&old.WriteTicks==info.LastWriteTimeUtc.Ticks&&old.CreationTicks==info.CreationTimeUtc.Ticks)return old.Hash;}string hash;using(var s=new FileStream(full,FileMode.Open,FileAccess.Read,FileShare.Read,1<<20,FileOptions.SequentialScan))using(var h=NewSha256())hash=BitConverter.ToString(h.ComputeHash(s)).Replace("-","");if(readOnlyHashCache!=null)readOnlyHashCache[full]=new HashEntry{Length=info.Length,WriteTicks=info.LastWriteTimeUtc.Ticks,CreationTicks=info.CreationTimeUtc.Ticks,Hash=hash,Fresh=true};return hash;}
     static void Save<T>(string path,T receipt) {
         Directory.CreateDirectory(Path.GetDirectoryName(path));string tmp=path+".tmp";
         byte[] bytes=System.Text.Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(receipt));

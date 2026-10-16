@@ -246,6 +246,16 @@ Test("SCSKiller options, progress lines and build support are read correctly",()
     try{new ScsKillerBridge(settings).SaveOptions(new ScsKillerOptions(4,true,false));var loaded=new ScsKillerBridge(settings).Load().Options;Check(loaded==new ScsKillerOptions(4,true,false),"Options were not kept.");}
     finally{File.Delete(settings);}
 });
+Test("Old session logs and overlay CSVs are pruned, nothing else",()=>{
+    string root=Path.Combine(Path.GetTempPath(),"ArcLogs-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
+    try{
+        string old=Path.Combine(root,"20250101-000000-1-x-winui.log"),csv=Path.Combine(root,"cache-monitor-20250101.csv"),fresh=Path.Combine(root,"20261017-000000-1-y-winui.log"),other=Path.Combine(root,"diagnostics.jsonl");
+        foreach(string f in new[]{old,csv,fresh,other}){File.WriteAllText(f,"x");}
+        foreach(string f in new[]{old,csv,other})File.SetLastWriteTimeUtc(f,DateTime.UtcNow.AddDays(-40));
+        Check(AppStore.PruneLogs(root,TimeSpan.FromDays(30))==2&&!File.Exists(old)&&!File.Exists(csv)&&File.Exists(fresh)&&File.Exists(other),"Pruning removed the wrong files.");
+    }finally{Directory.Delete(root,true);}
+    Check(SafetyClient.QuickActions.Contains("ObserveGame")&&!SafetyClient.QuickActions.Contains("VerifySize")&&!SafetyClient.QuickActions.Contains("ChangeGameTrial"),"Only display requests may time out.");
+});
 Test("Intel cache files are linked to a game only when one file clearly grew",()=>{
     string a=new string('a',64),b=new string('b',64),c=new string('c',64);
     var before=new Dictionary<string,long>{[a]=100L<<20,[b]=5L<<20};
@@ -321,11 +331,8 @@ if(args.Length>0) {
         }finally{Directory.Delete(root,true);}
     });
 
-    Test("Xe3 device experiments require consent and risk acknowledgment even for read-only requests",()=>{
-        foreach(string action in new[]{"CreateXe3Experiment","RunXe3Experiment"}){
-            var readOnly=safety.RunAsync(new(action,Confirmed:true,RiskConfirmed:true,ReadOnly:true)).GetAwaiter().GetResult();Check(!readOnly.Ok&&readOnly.Message.Contains("Read-only"),"Read-only request permitted a device experiment.");
-            var risk=safety.RunAsync(new(action,Confirmed:true)).GetAwaiter().GetResult();Check(!risk.Ok&&risk.Message.Contains("risk acknowledgment"),"Missing risk acknowledgment permitted a device experiment.");
-        }
+    Test("Retired experiment and inspection actions are no longer accepted",()=>{
+        foreach(string action in new[]{"CreateXe3Experiment","RunXe3Experiment","Observe","InspectGameTrial"}){var reply=safety.RunAsync(new(action,Confirmed:true,RiskConfirmed:true)).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.StartsWith("Unknown action"),"Retired action still runs: "+action);}
     });
     Test("Separate test requires explicit risk consent and read-only mode forbids its writes",()=>{
         var refused=safety.RunAsync(new("TryDriverTrial",Confirmed:true)).GetAwaiter().GetResult();Check(!refused.Ok&&refused.Message.Contains("Risk acknowledgment"),"Risk consent bypassed.");
@@ -336,7 +343,7 @@ if(args.Length>0) {
  });
     Test("Graphics statistics separate whole-PC RAM from shared disk files",()=>{var snapshot=safety.RunAsync(new("GraphicsStats",ReadOnly:true)).GetAwaiter().GetResult();Check(snapshot.Ok&&snapshot.Data.GetProperty("RamTotal").GetUInt64()>=snapshot.Data.GetProperty("RamAvailable").GetUInt64()&&snapshot.Data.GetProperty("DiskBytes").GetInt64()>=0,"Invalid memory/cache snapshot.");});
     Test("Worker refuses unknown operations without changes",()=>{var reply=safety.RunAsync(new("UnknownOperation")).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Unknown action"),"Unknown operation accepted.");});
-    Test("Worker refuses all mutation kinds without explicit confirmation",()=>{foreach(string action in new[]{"Prepare","Change","Remove","Import","EnableOverride","RestoreOverride","SelectGraphics","CreateXe3Experiment","RunXe3Experiment"}){var reply=safety.RunAsync(new(action)).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Explicit confirmation"),"Mutation accepted without confirmation: "+action);}});
+    Test("Worker refuses all mutation kinds without explicit confirmation",()=>{foreach(string action in new[]{"Prepare","Change","Remove","Import","EnableOverride","RestoreOverride","SelectGraphics"}){var reply=safety.RunAsync(new(action)).GetAwaiter().GetResult();Check(!reply.Ok&&reply.Message.Contains("Explicit confirmation"),"Mutation accepted without confirmation: "+action);}});
     Test("Automatic discovery never guesses an executable for a stopped unknown title",()=>{
         string root=Path.Combine(Path.GetTempPath(),"ArcDiscovery-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
         try{File.Copy(Environment.ProcessPath!,Path.Combine(root,"possible-game.exe"));var result=safety.RunAsync(new("DiscoverGame",SteamAppId:987654,InstallDirectory:root)).GetAwaiter().GetResult();Check(result.Ok&&!result.Data.GetProperty("Validated").GetBoolean()&&result.Data.GetProperty("Executable").ValueKind==JsonValueKind.Null,"A static executable filename was mistaken for a rendering process.");Check(!Directory.Exists(Path.Combine(root,"possible-game.exe.local")),"Discovery modified the game.");}finally{Directory.Delete(root,true);}

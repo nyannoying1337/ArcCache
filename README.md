@@ -99,7 +99,7 @@ Arc Cache doesn't go by GPU name. It looks at the installed driver file and only
 - **RAM:** with very large caches, the driver can need roughly the cache file's size in RAM while loading it.
 - **D3D11 games:** only the D3D12 driver is changed. D3D11 caches stay at 512 MB.
 - **Microsoft Store / Xbox app games** are listed, but they are packaged apps, and private driver copies probably don't apply to them. This is untested.
-- **Driver updates:** existing setups keep working with their copy. Arc Cache asks you to check again before you change sizes.
+- **Driver updates:** a set-up game keeps loading its copy of the *old* driver until you set it up again. Whether an old copy works with a newer installed driver hasn't been tested yet. After an update, open Arc Cache and run **Check support**, then return set-up games to default and set them up again. Until then, Arc Cache blocks starting them from its own button; a start from Steam isn't blocked.
 - **Not affiliated with Intel or the SCSKiller authors.** Use at your own risk.
 
 ## Build from source

@@ -34,11 +34,11 @@ public static class Engine {
     static readonly byte[] WideTwo=Hex("48B800000000010000004889410848D1E848894110893990");
     static readonly byte[] WideFour=Hex("48B800000000010000004889410848894110893990909090");
     public static byte[] Hex(string text) {return Enumerable.Range(0,text.Length/2).Select(i=>Convert.ToByte(text.Substring(i*2,2),16)).ToArray();}
-    public static string Hash(byte[] bytes) {using(var s=SHA256.Create()) return BitConverter.ToString(s.ComputeHash(bytes)).Replace("-","");}
+    public static string Hash(byte[] bytes) {using(var s=IsolationControl.NewSha256()) return BitConverter.ToString(s.ComputeHash(bytes)).Replace("-","");}
     public static void CheckPath(string path) {
         string full=Path.GetFullPath(path);
         for(string p=full; !String.IsNullOrEmpty(p); p=Path.GetDirectoryName(p)) {
-            if((File.GetAttributes(p)&FileAttributes.ReparsePoint)!=0) throw new InvalidDataException("Links and junctions are blocked.");
+            if((File.GetAttributes(p)&FileAttributes.ReparsePoint)!=0) throw new InvalidDataException("Links and junctions are blocked: "+p+" is a link or junction (for example a moved Steam library). Arc Cache only works with real folders, so it can't safely check what it would change. Install or move the game to a real folder.");
         }
     }
     public static byte[] Read(string path) {CheckPath(path); if(new FileInfo(path).Length<Size||new FileInfo(path).Length>Size+1048576) throw new InvalidDataException("Unsupported DLL size."); return File.ReadAllBytes(path);}

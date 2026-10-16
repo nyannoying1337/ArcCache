@@ -55,10 +55,6 @@ The bundled SCSKiller is the fork's `intel-cache-cap` branch. Arc Cache selects 
 
 User guides are under `src/ArcCache.WinUI/docs`. README artwork is an original SVG in `docs/assets`; no proprietary DLLs, personal receipts or diagnostic logs belong in Git. Preserve GPL/source attribution and runtime redistribution notices when packaging binaries.
 
-## Optional Xe3 probe
-
-Build `research/LargeCache/build-xe3-probe.cmd` before publishing to include `ArcCache.Xe3Probe.exe`. MSVC is required for this optional native component. The app itself still builds without it; preparing a device-test bundle then reports the missing component. See [test coverage](TESTING.md).
-
 ## Native graphics-check helper
 
 The app build compiles `src/ArcCache.Probe/DriverProbe.cpp` through its incremental build target. Install Visual Studio C++ Build Tools with the Windows SDK. The helper is bundled in downloads; users do not need a compiler. `src/ArcCache.Probe/build.cmd` can also build it directly.

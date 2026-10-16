@@ -240,6 +240,52 @@ public static class MatchedSet {
         var journal=new {Schema=1,Kind="Private game driver size-change recovery",Target=Path.GetFullPath(target),OriginalHash=Engine.Hash(before),NextHash=Engine.Hash(after),OriginalAcl=acl,Driver=DriverName(receipt),PreviousMiB=receipt.MiB,NextMiB=receipt.TrialMiB,CreatedUtc=DateTime.UtcNow.ToString("o")};
         File.WriteAllText(Path.Combine(folder,"journal.json"),new JavaScriptSerializer().Serialize(journal));
     }
+    // ---- Repair: finish or undo what an interrupted Prepare, size change or removal left behind ----
+    // Deletes only files it can prove are this setup's own: names from the receipt with the receipt's hash, or the one
+    // staging name a size change uses while the real driver file is still the receipt's. Anything else stops it.
+    internal sealed class RepairResult {public List<string> Done=new List<string>();public bool StatusReset,Removed;}
+    static bool IsRegularFile(string path){return File.Exists(path)&&(File.GetAttributes(path)&FileAttributes.ReparsePoint)==0;}
+    // A failed Prepare's "<exe>.local.pending-<guid>" folder next to the exe: removed when every file in it is one of the
+    // receipt's files with the receipt's hash. The patched driver in it carries the receipt's hash too.
+    internal static void RepairPrepareStaging(string executable,IDictionary<string,string> files,RepairResult result){
+        string full=Path.GetFullPath(executable),dir=Path.GetDirectoryName(full),prefix=Path.GetFileName(full)+".local.pending-";
+        foreach(string staging in Directory.GetDirectories(dir,prefix+"*")){
+            string suffix=Path.GetFileName(staging).Substring(prefix.Length);
+            if(!System.Text.RegularExpressions.Regex.IsMatch(suffix,"\\A[0-9a-f]{32}\\z"))continue;
+            Engine.CheckPath(staging);
+            Require(Directory.GetDirectories(staging).Length==0,"An unfinished setup folder contains subfolders; nothing was removed: "+staging);
+            var entries=Directory.GetFiles(staging);string expected;
+            foreach(string file in entries)Require(IsRegularFile(file)&&files.TryGetValue(Path.GetFileName(file),out expected)&&IsolationControl.FileHash(file)==expected,"An unfinished setup folder contains a file Arc Cache did not write; nothing was removed: "+file);
+            foreach(string file in entries)File.Delete(file);Directory.Delete(staging,false);result.Done.Add("Removed an unfinished setup folder ("+entries.Length+" files).");
+        }
+    }
+    // Inside the game's .local folder. removeStarted: a removal stopped half way, so every remaining file must be one of
+    // the receipt's and the removal is finished. Otherwise only the size change's "<driver>.pending" goes, and only while
+    // the real driver file is still exactly the receipt's (the change never replaced it).
+    internal static void RepairFolder(string folder,IDictionary<string,string> files,string driver,bool removeStarted,RepairResult result){
+        if(!Directory.Exists(folder))return;Engine.CheckPath(folder);
+        Require(Directory.GetDirectories(folder).Length==0,"The driver copy folder contains subfolders; nothing was removed.");
+        string target=Path.Combine(folder,driver),staging=target+".pending",expected;
+        if(File.Exists(staging)){
+            Require(IsRegularFile(staging),"The staged driver file is a link; nothing was removed.");
+            Require(IsRegularFile(target)&&files.TryGetValue(driver,out expected)&&IsolationControl.FileHash(target)==expected,"A size change stopped after replacing the driver file, so Arc Cache can't tell which file is right. Nothing was removed. The backup journal under large-cache-backups has the previous file.");
+            File.Delete(staging);result.Done.Add("Removed the unfinished size change ("+Path.GetFileName(staging)+"). The previous size stays.");result.StatusReset=true;
+        }
+        if(!removeStarted)return;
+        var entries=Directory.GetFiles(folder);
+        foreach(string file in entries)Require(IsRegularFile(file)&&files.TryGetValue(Path.GetFileName(file),out expected)&&IsolationControl.FileHash(file)==expected,"The driver copy folder contains a file Arc Cache did not write; nothing more was removed: "+file);
+        foreach(string file in entries)File.Delete(file);Directory.Delete(folder,false);result.Done.Add("Finished removing the driver copy ("+entries.Length+" files were left).");result.Removed=true;
+    }
+    public static string Repair(string receiptPath){
+        receiptPath=Path.GetFullPath(receiptPath);var r=Read(receiptPath);Closed(r.Executable,r.Game);var result=new RepairResult();
+        // A receipt save that stopped before its rename leaves "<receipt>.pending"; the receipt itself just read fine.
+        string pendingReceipt=receiptPath+".pending";if(IsRegularFile(pendingReceipt)){File.Delete(pendingReceipt);result.Done.Add("Removed an unfinished record save.");}
+        RepairPrepareStaging(r.Executable,r.Files,result);
+        RepairFolder(r.Folder,r.Files,DriverName(r),r.Status=="remove-started",result);
+        if(result.Removed){r.Status="removed";Save(receiptPath,r);}
+        else if(result.StatusReset){MarkChangedRuntimeUnverified(r);Save(receiptPath,r);}
+        return result.Done.Count==0?"":String.Join(" ",result.Done);
+    }
     public static string Remove(string receiptPath) {
         var r=Read(receiptPath);Closed(r.Executable,r.Game);
         if(!Directory.Exists(r.Folder)){r.Status="removed";Save(receiptPath,r);return "Private set is already absent.";}

@@ -79,7 +79,7 @@ public static class Isolation {
         }
         bool candidate=DotLocalCandidate(hasManifest,dev);
         string localD3D12=LocalD3D12(full);
-        string hash;using(var stream=File.OpenRead(full))using(var sha=System.Security.Cryptography.SHA256.Create())hash=BitConverter.ToString(sha.ComputeHash(stream)).Replace("-","");
+        string hash=IsolationControl.FileHash(full);
         var text=new StringBuilder();
         text.AppendLine("Per-game isolation preflight — READ ONLY");text.AppendLine("Executable: "+full);text.AppendLine("SHA-256: "+hash);
         text.AppendLine("Embedded application manifest: "+(manifest!=null?"present":"not found at resource ID 1"));

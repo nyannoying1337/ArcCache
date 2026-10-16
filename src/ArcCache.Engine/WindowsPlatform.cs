@@ -22,7 +22,28 @@ public static class WindowsPlatform {
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool Module32FirstW(IntPtr snapshot,ref ModuleEntry entry);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool Module32NextW(IntPtr snapshot,ref ModuleEntry entry);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr OpenProcess(uint access,bool inherit,int pid);
+    [DllImport("psapi.dll",SetLastError=true)] static extern bool EnumProcessModulesEx(IntPtr process,[Out] IntPtr[] modules,int size,out int needed,uint filter);
+    [DllImport("psapi.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern uint GetModuleFileNameExW(IntPtr process,IntPtr module,System.Text.StringBuilder name,int size);
+    // Full module paths of a process. psapi first: its paths are not cut at 260 characters (Toolhelp's are, so a game
+    // installed deep in a folder tree could never match its own .local copy). Toolhelp stays the fallback.
     public static List<string> ModulePaths(int pid) {
+        IntPtr process=OpenProcess(0x0410,false,pid); // PROCESS_QUERY_INFORMATION | PROCESS_VM_READ
+        if(process!=IntPtr.Zero) {
+            try {
+                var modules=new IntPtr[1024];
+                for(int attempt=0;attempt<3;attempt++) {
+                    int needed;if(!EnumProcessModulesEx(process,modules,modules.Length*IntPtr.Size,out needed,3))break; // LIST_MODULES_ALL; fails while a process starts
+                    int count=needed/IntPtr.Size;if(count>modules.Length){modules=new IntPtr[count+64];continue;}
+                    var paths=new List<string>(count);var name=new System.Text.StringBuilder(32768);
+                    for(int i=0;i<count;i++){name.Length=0;uint length=GetModuleFileNameExW(process,modules[i],name,name.Capacity);if(length==0)continue;string path=name.ToString();if(path.StartsWith(@"\\?\",StringComparison.Ordinal))path=path.Substring(4);paths.Add(path);}
+                    return paths;
+                }
+            } finally {CloseHandle(process);}
+        }
+        return ToolhelpModulePaths(pid);
+    }
+    static List<string> ToolhelpModulePaths(int pid) {
         IntPtr snapshot=new IntPtr(-1);
         for(int attempt=0;attempt<3;attempt++){snapshot=CreateToolhelp32Snapshot(0x18,(uint)pid);if(snapshot!=new IntPtr(-1)||Marshal.GetLastWin32Error()!=24)break;}
         if(snapshot==new IntPtr(-1))throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());

@@ -146,7 +146,7 @@ try {
     if (!$SkipApp) {
         Run 'engine-build' 'cmd.exe' @('/c', (Join-Path $repo 'src\ArcCache.Engine\build.cmd'))
         $engineTests = Join-Path $repo 'src\ArcCache.Engine\bin\ArcCap.Tests.exe'
-        foreach ($mode in @('--capabilities', '--driver-resolution', '--isolation-proxy-tests', '--test-historical-trial-receipt')) { Run "engine-tests $mode" $engineTests @($mode) }
+        foreach ($mode in @('--capabilities', '--driver-resolution', '--isolation-proxy-tests', '--test-historical-trial-receipt', '--hash-cache', '--repair', '--module-paths')) { Run "engine-tests $mode" $engineTests @($mode) }
         # the installed Intel package, read only
         # the package the Arc adapter actually uses (InstalledDisplayDrivers lists its DriverStore UMD paths)
         $pkg = $null

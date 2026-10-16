@@ -10,6 +10,54 @@ static class Tests {
     static void Check(bool value,string error){if(!value)throw new Exception(error);}
     static void Reject(Action action){try{action();}catch(InvalidDataException){return;}throw new Exception("Operation should have been blocked");}
     static void Test(string name,Action body){body();passed++;string line="PASS "+name;report.Add(line);Console.WriteLine(line);}
+    // Hashes are reused across runs only for unchanged files, and a scope that saw nothing new leaves the cache file alone.
+    static void TestHashCache(){
+        string root=Path.Combine(Path.GetTempPath(),"ArcCacheHashCache-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
+        try{
+            string file=Path.Combine(root,"driver.dll"),cache=Path.Combine(root,"hash-cache.json");File.WriteAllText(file,"first");
+            string expected=Engine.Hash(File.ReadAllBytes(file)),first;
+            Check(expected==BitConverter.ToString(System.Security.Cryptography.SHA256.Create().ComputeHash(File.ReadAllBytes(file))).Replace("-",""),"CNG and managed SHA-256 differ.");
+            using(IsolationControl.BeginPersistentHashCache(cache))first=IsolationControl.FileHash(file);
+            Check(first==expected&&File.Exists(cache),"The first read-only hash was not saved.");
+            var saved=new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string,Dictionary<string,object>>>(File.ReadAllText(cache));
+            saved[Path.GetFullPath(file)]["Hash"]=new string('A',64);File.WriteAllText(cache,new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(saved));DateTime written=File.GetLastWriteTimeUtc(cache);
+            using(IsolationControl.BeginPersistentHashCache(cache))Check(IsolationControl.FileHash(file)==new string('A',64),"An unchanged file was hashed again instead of using the saved hash.");
+            Check(File.GetLastWriteTimeUtc(cache)==written,"A scope without new hashes rewrote the cache.");
+            File.WriteAllText(file,"second");File.SetLastWriteTimeUtc(file,File.GetLastWriteTimeUtc(file).AddSeconds(5));
+            using(IsolationControl.BeginPersistentHashCache(cache))Check(IsolationControl.FileHash(file)==Engine.Hash(File.ReadAllBytes(file)),"A changed file used its old saved hash.");
+            Check(IsolationControl.FileHash(file)==Engine.Hash(File.ReadAllBytes(file)),"Outside a scope the hash must be computed.");
+            File.WriteAllText(cache,"{ not json");using(IsolationControl.BeginPersistentHashCache(cache))Check(IsolationControl.FileHash(file)==Engine.Hash(File.ReadAllBytes(file)),"A damaged cache file must be ignored.");
+            Console.WriteLine("PASS hash cache: CNG matches managed SHA-256; unchanged files reuse, changed files and damaged caches rehash.");
+        }finally{if(Directory.Exists(root))Directory.Delete(root,true);}
+    }
+    // Repair removes only what it can prove is the setup's own, and stops on anything else.
+    static void TestRepair(){
+        string root=Path.Combine(Path.GetTempPath(),"ArcCacheRepair-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
+        try{
+            string exe=Path.Combine(root,"game.exe"),folder=exe+".local",driver="igd12um64xe2.dll";File.WriteAllText(exe,"game");
+            Func<string,string> hash=text=>Engine.Hash(System.Text.Encoding.UTF8.GetBytes(text));
+            var files=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase){{driver,hash("driver 16 GB")},{"igd12umd64.dll",hash("loader")}};
+            Action fill=()=>{Directory.CreateDirectory(folder);File.WriteAllText(Path.Combine(folder,driver),"driver 16 GB");File.WriteAllText(Path.Combine(folder,"igd12umd64.dll"),"loader");};
+            // an interrupted size change: the real driver is still the receipt's, the staged next size goes
+            fill();File.WriteAllText(Path.Combine(folder,driver+".pending"),"driver 2 GB");var r=new MatchedSet.RepairResult();
+            MatchedSet.RepairFolder(folder,files,driver,false,r);Check(r.StatusReset&&!File.Exists(Path.Combine(folder,driver+".pending"))&&Directory.GetFiles(folder).Length==2,"The staged size change was not removed cleanly.");
+            // the driver was already replaced: unclear which file is right, so nothing is removed
+            File.WriteAllText(Path.Combine(folder,driver+".pending"),"x");File.WriteAllText(Path.Combine(folder,driver),"driver 2 GB");
+            Reject(()=>MatchedSet.RepairFolder(folder,files,driver,false,new MatchedSet.RepairResult()));Check(File.Exists(Path.Combine(folder,driver+".pending")),"A staging file was removed although the driver had changed.");
+            Directory.Delete(folder,true);
+            // a removal that stopped half way is finished; a foreign file stops it untouched
+            fill();File.Delete(Path.Combine(folder,"igd12umd64.dll"));r=new MatchedSet.RepairResult();MatchedSet.RepairFolder(folder,files,driver,true,r);Check(r.Removed&&!Directory.Exists(folder),"The interrupted removal was not finished.");
+            fill();File.WriteAllText(Path.Combine(folder,"mod.dll"),"not ours");Reject(()=>MatchedSet.RepairFolder(folder,files,driver,true,new MatchedSet.RepairResult()));Check(Directory.GetFiles(folder).Length==3,"Files were removed next to a foreign file.");
+            Directory.Delete(folder,true);
+            // a failed Prepare's staging folder: removed when every file is the receipt's, kept otherwise
+            string staging=folder+".pending-"+Guid.NewGuid().ToString("N");Directory.CreateDirectory(staging);File.WriteAllText(Path.Combine(staging,driver),"driver 16 GB");
+            r=new MatchedSet.RepairResult();MatchedSet.RepairPrepareStaging(exe,files,r);Check(!Directory.Exists(staging)&&r.Done.Count==1,"The unfinished setup folder was not removed.");
+            Directory.CreateDirectory(staging);File.WriteAllText(Path.Combine(staging,driver),"changed");Reject(()=>MatchedSet.RepairPrepareStaging(exe,files,new MatchedSet.RepairResult()));Check(File.Exists(Path.Combine(staging,driver)),"A changed staging file was removed.");
+            string other=Path.Combine(root,"game.exe.local.pending-notaguid");Directory.CreateDirectory(other);File.WriteAllText(Path.Combine(other,"keep.txt"),"x");Directory.Delete(staging,true);
+            MatchedSet.RepairPrepareStaging(exe,files,new MatchedSet.RepairResult());Check(File.Exists(Path.Combine(other,"keep.txt")),"A folder with a foreign name was touched.");
+            Console.WriteLine("PASS repair: removes only the setup's own leftovers and stops on foreign or ambiguous files.");
+        }finally{if(Directory.Exists(root))Directory.Delete(root,true);}
+    }
     static void TestCapabilities(){
         var reviewed=DriverCatalog.LimitCapabilities(true,null);Check(reviewed.Where(x=>x.Available).Select(x=>x.MiB).SequenceEqual(new[]{512,1024,2048,8192,16384})&&reviewed.Single(x=>x.MiB==4096).Evidence.Contains("zero bytes"),"Reviewed package exposed unsafe direct 4 GiB I/O.");
         var tested=DriverCatalog.LimitCapabilities(false,"igd12um64xe2.dll");Check(tested.Where(x=>x.Available).Select(x=>x.MiB).SequenceEqual(new[]{512,1024}),"One-gigabyte test exposed unverified sizes.");
@@ -61,6 +109,13 @@ static class Tests {
                 Console.WriteLine("PASS Xe1 guard on real "+driver+": 1 GiB buildable; 2/4/8/16 GiB refused without modifying source bytes.");return 0;
             }
             if(args.Length==1&&args[0]=="--capabilities"){TestCapabilities();return 0;}
+            if(args.Length==1&&args[0]=="--hash-cache"){TestHashCache();return 0;}
+            if(args.Length==1&&args[0]=="--repair"){TestRepair();return 0;}
+            if(args.Length==1&&args[0]=="--module-paths"){
+                string self=System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;var paths=WindowsPlatform.ModulePaths(System.Diagnostics.Process.GetCurrentProcess().Id);
+                Check(paths.Any(p=>p.Equals(self,StringComparison.OrdinalIgnoreCase))&&paths.Any(p=>Path.GetFileName(p).Equals("kernel32.dll",StringComparison.OrdinalIgnoreCase))&&paths.All(p=>!p.StartsWith(@"\\?\",StringComparison.Ordinal)),"Module paths of this process are incomplete.");
+                Console.WriteLine("PASS module paths: "+paths.Count+" modules with full paths.");return 0;
+            }
             if(args.Length==1&&args[0]=="--driver-resolution"){TestLoaderOnlyDriverResolution();return 0;}
             if(args.Length==2&&args[0]=="--validate-record"){
                 var receipt=MatchedSet.Read(args[1]);MatchedSet.ValidateContents(receipt);

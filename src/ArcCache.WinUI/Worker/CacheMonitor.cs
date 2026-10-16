@@ -68,10 +68,13 @@ class CacheMonitor : Form {
         if(cacheFile==null)return "Cache use: link this game's file first (Prepare shaders) for a verdict";
         long before;initial.Sizes.TryGetValue(name,out before);
         if(before>(512L<<20)+(1L<<20)&&size<before-(1L<<20))return "Cache use: WARNING - the file shrank; the normal 512 MB driver may have trimmed it";
+        // The verdict follows the driver line above it: with the normal driver the larger limit does not apply at all.
+        bool copyLoaded=driverStatus.StartsWith("Game setup: custom copy loaded",StringComparison.Ordinal);
+        if(driverStatus.StartsWith("Game setup: normal or other copy loaded",StringComparison.Ordinal))return "Cache use: WARNING - the normal driver is loaded, so this game is limited to 512 MB";
         string other=null;long otherGrowth=0;foreach(var pair in now.Sizes){if(pair.Key.Equals(name,StringComparison.OrdinalIgnoreCase))continue;long old;long grew=pair.Value-(initial.Sizes.TryGetValue(pair.Key,out old)?old:0);if(grew>otherGrowth){otherGrowth=grew;other=pair.Key;}}
         if(otherGrowth>(64L<<20)&&otherGrowth>Math.Max(grewSince,0)*4)return "Cache use: another cache file grows faster ("+other.Substring(0,8)+"..., +"+Number(otherGrowth)+")";
         if((DateTime.Now-monitorStarted).TotalSeconds<60)return "Cache use: watching... (play for a minute)";
-        if(grewSince<(32L<<20))return "Cache use: GOOD - reading the prepared cache (only +"+Number(Math.Max(grewSince,0))+" new)";
+        if(grewSince<(32L<<20))return copyLoaded?"Cache use: GOOD - reading the prepared cache (only +"+Number(Math.Max(grewSince,0))+" new)":"Cache use: little new compiling (+"+Number(Math.Max(grewSince,0))+"), but the driver copy isn't confirmed";
         return "Cache use: the game is still adding shaders (+"+Number(grewSince)+") - normal for new areas";
     }
     void Sample() {

@@ -9,7 +9,20 @@ public sealed class SafetyClient(string workerPath) {
     public Action<int,string>? Progress {get;set;}
     async Task<string> ReadErrors(StreamReader reader){var errors=new System.Text.StringBuilder();while(await reader.ReadLineAsync() is string line){if(line.StartsWith("ARCCACHE_PROGRESS ")){try{using var message=JsonDocument.Parse(line[18..]);int value=message.RootElement.GetProperty("Percent").GetInt32();string text=message.RootElement.GetProperty("Message").GetString()??"";Progress?.Invoke(Math.Clamp(value,0,100),text);}catch(Exception error){Trace("progress-error",error.Message);}}else{if(errors.Length<65536)errors.AppendLine(line);}}return errors.ToString();}
     void Trace(string kind,object value){try{Diagnostic?.Invoke(kind,value);}catch{}}
+    /// <summary>Requests the app sends on its own (polling, showing a page) that must answer quickly. A hung engine then
+    /// stops after this limit instead of leaving background checks waiting forever. Actions the user starts, and checks that
+    /// save a result (VerifySize, VerifyControl), have none: stopping those mid-save could leave a staging file behind.</summary>
+    public static readonly IReadOnlySet<string> QuickActions=new HashSet<string>(StringComparer.Ordinal){"GameState","ObserveGame","DiscoverGame","DriverIdentity","Routing","GraphicsStats","Safety"};
+    public static TimeSpan QuickLimit {get;set;}=TimeSpan.FromMinutes(2);
     public async Task<WorkerReply> RunAsync(WorkerRequest request,CancellationToken cancellationToken=default) {
+        if(QuickActions.Contains(request.Action)){
+            using var limit=CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);limit.CancelAfter(QuickLimit);
+            try{return await RunCore(request,limit.Token);}
+            catch(OperationCanceledException)when(!cancellationToken.IsCancellationRequested){throw new TimeoutException($"The safety engine did not answer within {QuickLimit.TotalSeconds:0} s ({request.Action}). It was stopped; nothing was changed.");}
+        }
+        return await RunCore(request,cancellationToken);
+    }
+    async Task<WorkerReply> RunCore(WorkerRequest request,CancellationToken cancellationToken) {
         var watch=Stopwatch.StartNew();Trace("worker-request",request);
         try {
         var info=new ProcessStartInfo(workerPath) {UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true};
@@ -38,7 +51,16 @@ public sealed class AppStore {
     public string GamesDirectory=>Path.Combine(Root,"games");
     public string RecentGamesPath=>Path.Combine(Root,"recent-games.json");
     public string LogPath {get;}
-    public AppStore(string? root=null){Root=root??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap");Directory.CreateDirectory(GamesDirectory);Directory.CreateDirectory(Path.Combine(Root,"logs"));LogPath=Path.Combine(Root,"logs",DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff")+"-"+Environment.ProcessId+"-"+Guid.NewGuid().ToString("N")+"-winui.log");}
+    public AppStore(string? root=null){Root=root??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap");Directory.CreateDirectory(GamesDirectory);Directory.CreateDirectory(Path.Combine(Root,"logs"));PruneLogs(Path.Combine(Root,"logs"),TimeSpan.FromDays(30));LogPath=Path.Combine(Root,"logs",DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff")+"-"+Environment.ProcessId+"-"+Guid.NewGuid().ToString("N")+"-winui.log");}
+    /// <summary>Deletes this app's own session logs and overlay CSVs older than <paramref name="age"/>. Only those two file
+    /// patterns directly in the logs folder; diagnostics rotate by size on their own.</summary>
+    public static int PruneLogs(string folder,TimeSpan age){
+        int removed=0;DateTime cutoff=DateTime.UtcNow-age;
+        try{foreach(string pattern in new[]{"*-winui.log","cache-monitor-*.csv"})foreach(var file in new DirectoryInfo(folder).EnumerateFiles(pattern,SearchOption.TopDirectoryOnly))
+            try{if(!file.Attributes.HasFlag(FileAttributes.ReparsePoint)&&file.LastWriteTimeUtc<cutoff){file.Delete();removed++;}}catch(Exception e)when(e is IOException or UnauthorizedAccessException){}}
+        catch(Exception e)when(e is IOException or UnauthorizedAccessException){}
+        return removed;
+    }
     public string Receipt(uint appId)=>Path.Combine(GamesDirectory,"steam-"+appId+".json");
     public string Receipt(SteamGame game)=>Receipt(game.Key);
     public string Receipt(string key){if(!ArcCap.GameIdentity.ValidKey(key))throw new InvalidDataException("Invalid game identity.");return Path.Combine(GamesDirectory,key+".json");}
