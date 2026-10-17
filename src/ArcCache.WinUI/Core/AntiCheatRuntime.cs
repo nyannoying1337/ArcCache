@@ -70,3 +70,19 @@ public sealed class AntiCheatSightings(string path) {
     public void Record(string key, AntiCheatSighting sighting) { lock (gate) { Load()[key] = sighting; Save(); } }
     public bool Clear(string key) { lock (gate) { bool removed = Load().Remove(key); if (removed) Save(); return removed; } }
 }
+
+/// <summary>Games the user chose to use with an anti-cheat anyway, after the full warning. Kept in anticheat-overrides.json.</summary>
+public sealed class AntiCheatOverrides(string path) {
+    readonly object gate = new();
+    Dictionary<string, DateTime>? cache;
+    Dictionary<string, DateTime> Load() {
+        if (cache != null) return cache;
+        try { cache = File.Exists(path) && new FileInfo(path).Length < 1024 * 1024 ? JsonSerializer.Deserialize<Dictionary<string, DateTime>>(File.ReadAllText(path)) : null; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { cache = null; }
+        return cache ??= new(StringComparer.Ordinal);
+    }
+    void Save() { try { File.WriteAllText(path, JsonSerializer.Serialize(cache)); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } }
+    public DateTime? Get(string key) { lock (gate) return Load().TryGetValue(key, out var utc) ? utc : null; }
+    public void Set(string key) { lock (gate) { Load()[key] = DateTime.UtcNow; Save(); } }
+    public void Clear(string key) { lock (gate) { if (Load().Remove(key)) Save(); } }
+}

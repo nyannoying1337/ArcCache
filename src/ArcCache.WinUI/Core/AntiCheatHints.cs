@@ -56,30 +56,56 @@ public static class AntiCheatHints {
         (".build.info", "Battle.net (online-only checks)", true), (".product.db", "Battle.net (online-only checks)", true)
     ];
 
-    static bool Matches(string name, string marker) =>
-        marker.StartsWith('*') ? name.EndsWith(marker[1..], StringComparison.OrdinalIgnoreCase) : name.Equals(marker, StringComparison.OrdinalIgnoreCase);
-
     // Bounded walk: top folders of a game hold the launcher and anti-cheat files. An always-on marker wins over an optional one.
+    // Marker names are compared through one hash lookup; wildcard markers ("*_BE.exe", "*.xem") are few and checked by suffix.
+    static readonly Dictionary<string, (string Name, bool AlwaysOn)> Exact = Markers.Where(m => !m.Marker.StartsWith('*')).GroupBy(m => m.Marker, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => (g.First().Name, g.First().AlwaysOn), StringComparer.OrdinalIgnoreCase);
+    static readonly (string Suffix, string Name, bool AlwaysOn)[] Suffixes = Markers.Where(m => m.Marker.StartsWith('*')).Select(m => (m.Marker[1..], m.Name, m.AlwaysOn)).ToArray();
+
     public static AntiCheatHint Scan(string? root, int maxDepth = 4, int maxEntries = 20000) {
         if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return AntiCheatHint.NotChecked;
         AntiCheatHint? optional = null; int seen = 0;
-        var queue = new Queue<(string Path, int Depth)>(); queue.Enqueue((root, 0));
+        var queue = new Queue<(DirectoryInfo Folder, int Depth)>(); queue.Enqueue((new DirectoryInfo(root), 0));
         var options = new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint | FileAttributes.System };
         while (queue.Count > 0 && seen < maxEntries) {
             var (folder, depth) = queue.Dequeue();
-            IEnumerable<string> entries;
-            try { entries = Directory.EnumerateFileSystemEntries(folder, "*", options); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
-            foreach (string entry in entries) {
-                if (++seen > maxEntries) break;
-                string name = Path.GetFileName(entry);
-                foreach (var m in Markers) {
-                    if (!Matches(name, m.Marker)) continue;
-                    if (m.AlwaysOn) return new(AntiCheatLevel.AlwaysOn, m.Name, entry);
-                    optional ??= new(AntiCheatLevel.Optional, m.Name, entry);
+            IEnumerable<FileSystemInfo> entries;
+            try { entries = folder.EnumerateFileSystemInfos("*", options); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
+            try {
+                foreach (var entry in entries) {
+                    if (++seen > maxEntries) break;
+                    (string Name, bool AlwaysOn)? hit = Exact.TryGetValue(entry.Name, out var exact) ? exact : null;
+                    if (hit is null) foreach (var s in Suffixes) if (entry.Name.EndsWith(s.Suffix, StringComparison.OrdinalIgnoreCase)) { hit = (s.Name, s.AlwaysOn); break; }
+                    if (hit is { } found) {
+                        if (found.AlwaysOn) return new(AntiCheatLevel.AlwaysOn, found.Name, entry.FullName);
+                        optional ??= new(AntiCheatLevel.Optional, found.Name, entry.FullName);
+                    }
+                    if (depth + 1 < maxDepth && entry is DirectoryInfo sub) queue.Enqueue((sub, depth + 1));
                 }
-                if (depth + 1 < maxDepth && Directory.Exists(entry)) queue.Enqueue((entry, depth + 1));
-            }
+            } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
         return optional ?? new(AntiCheatLevel.NoneFound);
+    }
+
+    // The folder's own timestamp changes when a game update adds or removes top-level files; a stale entry is rescanned.
+    public static long Stamp(string? root) { try { return string.IsNullOrWhiteSpace(root) || !Directory.Exists(root) ? 0 : Directory.GetLastWriteTimeUtc(root).Ticks; } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return 0; } }
+}
+
+/// <summary>Results of the quick folder scan, kept in anticheat-hints.json so the game list is marked right away on the next start.</summary>
+public sealed class AntiCheatHintCache(string path) {
+    public sealed record Entry(AntiCheatLevel Level, string Name, string Marker, long Stamp);
+    readonly object gate = new();
+    Dictionary<string, Entry>? cache;
+    Dictionary<string, Entry> Load() {
+        if (cache != null) return cache;
+        try { cache = File.Exists(path) && new FileInfo(path).Length < 4 * 1024 * 1024 ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, Entry>>(File.ReadAllText(path)) : null; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { cache = null; }
+        return cache ??= new(StringComparer.Ordinal);
+    }
+    public AntiCheatHint? Get(string key, long stamp) { lock (gate) return Load().TryGetValue(key, out var e) && e.Stamp == stamp && stamp != 0 ? new AntiCheatHint(e.Level, e.Name, e.Marker) : null; }
+    public void Put(IEnumerable<(string Key, AntiCheatHint Hint, long Stamp)> results) {
+        lock (gate) {
+            var all = Load(); foreach (var r in results) if (r.Hint.Level != AntiCheatLevel.NotChecked) all[r.Key] = new(r.Hint.Level, r.Hint.Name, r.Hint.Marker, r.Stamp);
+            try { File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(all)); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
     }
 }

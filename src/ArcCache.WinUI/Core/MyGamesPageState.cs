@@ -32,7 +32,9 @@ public sealed record MyGamesPageInputs(
     LocalModBlocker? ModBlocker = null,
     bool RequiresTrialProfile = false,
     bool TrialProfileFound = true,
-    AntiCheatSighting? AntiCheatSeen = null);
+    AntiCheatSighting? AntiCheatSeen = null,
+    AntiCheatHint? AntiCheatFiles = null,
+    DateTime? AntiCheatOverride = null);
 
 public sealed record MyGamesPageState(
     string Key, string HeaderStatus, string ListBadge, bool ShowGameFlow, bool ShowEmptyLibrary,
@@ -86,7 +88,11 @@ public static class MyGamesPageStates {
         if (i.ModBlocker is { } blocker)
             return Make(i,"blocked-by-another-mod","Blocked by another mod","Blocked",false,false,false,false,"","",false,"","",false,"","",false,0,false,false,false,false,false,false,"",MyGamesAction.OpenGameFolder,$"Found {blocker.DisplayName}. A mod such as OptiScaler or ReShade also hooks into DirectX, and combining both can crash the game.\nFile: {blocker.Path}\nRemove or disable the mod, then check again.");
         // An anti-cheat that runs next to the game sees the changed driver file, whatever mode the game is in.
-        if (i.AntiCheatSeen is { } seen)
+        // The user can still choose to go ahead (AntiCheatOverride) after a full warning; then the normal flow continues.
+        if (i.AntiCheatSeen is null && i.AntiCheatFiles is { AlwaysOn: true } files && i.AntiCheatOverride is null)
+            return Make(i,"anticheat-files","This game uses an anti-cheat","Anti-cheat",false,false,false,false,"","",false,"","",false,"","",false,0,false,false,false,false,false,false,"",i.SetupExists?MyGamesAction.RestoreGame:MyGamesAction.None,
+                $"{files.Name} runs whenever this game starts. It would see the changed Intel driver file, even in single-player, and could block the game or get your account banned. Arc Cache doesn't set this game up unless you accept that risk.");
+        if (i.AntiCheatSeen is { } seen && i.AntiCheatOverride is null)
             return i.SetupExists
                 ? Make(i,"anticheat-with-copy","Anti-cheat ran with the driver copy","Anti-cheat",false,false,false,false,"","",false,"","",false,"","",false,0,false,false,false,false,false,false,"",MyGamesAction.RestoreGame,
                     $"{seen.Name} was running while this game ran with its driver copy ({seen.When}). The anti-cheat can see the changed Intel driver file and may block the game or flag your account. Choose Use default settings. Set it up again only if the game can start without {seen.Name}.")
@@ -167,6 +173,7 @@ public static class MyGamesPageStates {
         ("trial-profile-not-found","game not observed with the tested driver copy",new(RequiresTrialProfile:true,TrialProfileFound:false,ProfileFound:true),MyGamesAction.LaunchForDiscovery),
         ("blocked-by-another-mod","blocked by local d3d12.dll",new(ModBlocker:new LocalModBlocker(@"D:\SteamLibrary\steamapps\common\Palworld\Pal\Binaries\Win64\d3d12.dll",ProductName:"OptiScaler",FileDescription:"OptiScaler DirectX proxy",CompanyName:"OptiScaler")),MyGamesAction.OpenGameFolder),
         ("anticheat-running","anti-cheat seen running before setup",new(AntiCheatSeen:new("Easy Anti-Cheat",new DateTime(2026,10,17,9,50,0,DateTimeKind.Utc),false)),MyGamesAction.None),
+        ("anticheat-files","always-on anti-cheat files found",new(AntiCheatFiles:new(AntiCheatLevel.AlwaysOn,"Riot Vanguard")),MyGamesAction.None),
         ("anticheat-with-copy","anti-cheat seen running with the driver copy",new(SetupExists:true,ControlVerified:true,AntiCheatSeen:new("BattlEye",new DateTime(2026,10,17,9,50,0,DateTimeKind.Utc),true)),MyGamesAction.RestoreGame),
         ("dx12-unavailable","DirectX 12 unavailable",new(Dx12Unavailable:true),MyGamesAction.None),
         ("not-set-up","not set up",new(),MyGamesAction.SetUp),

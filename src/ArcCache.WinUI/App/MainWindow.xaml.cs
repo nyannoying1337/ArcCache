@@ -110,7 +110,7 @@ public partial class MainWindow : Window {
         Activated+=async (_,e)=>{if(e.WindowActivationState!=WindowActivationState.Deactivated)await CheckDriverChanged();};
         discoveryTimer.Tick+=async (_,_)=>await PollGame();
         try{scs=new ScsKillerBridge(Path.Combine(store.Root,"scskiller-bridge.json")).Load();string bundled=Path.Combine(AppContext.BaseDirectory,"SCSKiller","cli","scskiller.exe");if(scs.CliPath==null&&File.Exists(bundled))scs.SelectCli(bundled);ScsPath.Text=scs.CliPath??"Choose the SCSKiller command-line program (scskiller.exe).";}catch(Exception e){Log("SCSKiller configuration could not be read: "+e.Message);scs=new ScsKillerBridge(Path.Combine(store.Root,"scskiller-bridge.json"));}
-        cacheFiles=new CacheFileMap(Path.Combine(store.Root,"cache-files.json"));sightings=new AntiCheatSightings(Path.Combine(store.Root,"anticheat-sightings.json"));ShowScsOptions();DispatcherQueue.TryEnqueue(async()=>await RefreshScsInfo());
+        cacheFiles=new CacheFileMap(Path.Combine(store.Root,"cache-files.json"));sightings=new AntiCheatSightings(Path.Combine(store.Root,"anticheat-sightings.json"));hintCache=new AntiCheatHintCache(Path.Combine(store.Root,"anticheat-hints.json"));overrides=new AntiCheatOverrides(Path.Combine(store.Root,"anticheat-overrides.json"));ShowScsOptions();DispatcherQueue.TryEnqueue(async()=>await RefreshScsInfo());
     }
 #if DEBUG
     void LoadDeveloperStatePreview(GraphicsPageInputs input,string requestedKey){
@@ -281,7 +281,7 @@ public partial class MainWindow : Window {
     }
     static readonly string[] StatusFilters=["All games","Set up","Needs attention","No anti-cheat found","Anti-cheat"];
     readonly Dictionary<string,AntiCheatHint> antiCheatHints=new();
-    AntiCheatSightings? sightings;string? acSessionKey;DateTime acSessionStart,lastAcSample;bool acSessionSeen;
+    AntiCheatSightings? sightings;AntiCheatHintCache? hintCache;AntiCheatOverrides? overrides;string? acSessionKey;DateTime acSessionStart,lastAcSample;bool acSessionSeen;
     static readonly TimeSpan CleanRunNeeded=TimeSpan.FromSeconds(30);
     // Watches the selected game while it runs: an anti-cheat process next to it blocks setup (or, with a driver copy,
     // asks for default settings); 30 seconds without one clear an earlier sighting, e.g. Halo MCC without anti-cheat.
@@ -295,7 +295,7 @@ public partial class MainWindow : Window {
             bool withCopy=selected?.Key==game.Key&&selectedReceipt is not null&&selectedReceipt.Status!="removed";
             sightings.Record(game.Key,new AntiCheatSighting(name,now,withCopy));
             Log(withCopy?$"{name} is running while {game.Name} uses its driver copy. Close the game and choose Use default settings.":$"{name} is running with {game.Name}. Arc Cache won't set this game up while an anti-cheat runs.");
-            if(withCopy){GlobalNotice.Severity=InfoBarSeverity.Error;GlobalNotice.Title=$"{name} is running with {game.Name}'s driver copy";GlobalNotice.Message="The anti-cheat can see the changed Intel driver file. Close the game and choose Use default settings for it.";GlobalNotice.IsOpen=true;}
+            if(withCopy&&overrides?.Get(game.Key) is null){GlobalNotice.Severity=InfoBarSeverity.Error;GlobalNotice.Title=$"{name} is running with {game.Name}'s driver copy";GlobalNotice.Message="The anti-cheat can see the changed Intel driver file. Close the game and choose Use default settings for it.";GlobalNotice.IsOpen=true;}
             Filter();RenderMyGames();
         }else if(!acSessionSeen&&now-acSessionStart>=CleanRunNeeded&&sightings.Get(game.Key) is { } old&&!old.WithDriverCopy){
             sightings.Clear(game.Key);Log($"{game.Name} ran for 30 seconds without {old.Name}. Setup is available again.");Filter();RenderMyGames();
@@ -304,11 +304,45 @@ public partial class MainWindow : Window {
 
     // A quick, bounded look into each game folder so the list can mark anti-cheat games before one is opened.
     async Task ScanAntiCheat(){
-        if(preview&&developerMyGamesPreview)return;
+        if(preview&&developerMyGamesPreview||hintCache is null)return;
         var pending=games.Where(g=>!antiCheatHints.ContainsKey(g.Key)).Select(g=>(g.Key,g.InstallDirectory)).ToArray();if(pending.Length==0)return;
-        var found=await Task.Run(()=>{var results=new System.Collections.Concurrent.ConcurrentDictionary<string,AntiCheatHint>();Parallel.ForEach(pending,new ParallelOptions{MaxDegreeOfParallelism=4},game=>{try{results[game.Key]=AntiCheatHints.Scan(game.InstallDirectory);}catch(Exception){results[game.Key]=AntiCheatHint.NotChecked;}});return results;});
-        foreach(var pair in found)antiCheatHints[pair.Key]=pair.Value;
-        Filter();
+        // Cached results (folder unchanged since the last scan) show at once; only new or changed folders are walked.
+        var stamps=await Task.Run(()=>pending.Select(g=>(g.Key,g.InstallDirectory,Stamp:AntiCheatHints.Stamp(g.InstallDirectory))).ToArray());
+        var toScan=new List<(string Key,string InstallDirectory,long Stamp)>();
+        foreach(var g in stamps){if(hintCache.Get(g.Key,g.Stamp) is { } cached)antiCheatHints[g.Key]=cached;else toScan.Add(g);}
+        Filter();if(toScan.Count==0)return;
+        int done=0;var progress=new Progress<int>(n=>{if(n>=toScan.Count||activePageTag!="Library")return;LibraryCount.Text=$"{GamesList.Items.Count} of {games.Count} games · checking for anti-cheat {n}/{toScan.Count}";});
+        var found=await Task.Run(()=>{var results=new System.Collections.Concurrent.ConcurrentBag<(string Key,AntiCheatHint Hint,long Stamp)>();IProgress<int> report=progress;Parallel.ForEach(toScan,new ParallelOptions{MaxDegreeOfParallelism=4},game=>{AntiCheatHint hint;try{hint=AntiCheatHints.Scan(game.InstallDirectory);}catch(Exception){hint=AntiCheatHint.NotChecked;}results.Add((game.Key,hint,game.Stamp));report.Report(Interlocked.Increment(ref done));});return results.ToArray();});
+        foreach(var r in found)antiCheatHints[r.Key]=r.Hint;
+        await Task.Run(()=>hintCache.Put(found));
+        Filter();if(selected is not null)RenderMyGames();
+    }
+    // The user may go ahead with an anti-cheat game, but only after reading what can happen and confirming it twice.
+    async void AcceptAntiCheatRisk(object sender,RoutedEventArgs e){
+        if(PreviewOnlyFeedback()||busy||selected is null||overrides is null)return;var game=selected;
+        var seen=sightings?.Get(game.Key);string name=seen?.Name??(antiCheatHints.TryGetValue(game.Key,out var hint)&&hint.Level is AntiCheatLevel.AlwaysOn or AntiCheatLevel.Optional?hint.Name:"The anti-cheat");
+        var panel=new StackPanel{Spacing=8};
+        panel.Children.Add(new TextBlock{Text=$"{name} checks every file that is loaded into {game.Name}. With Arc Cache, one of them is a changed Intel driver file whose signature is no longer valid. To an anti-cheat, that looks like a cheat hooking the renderer.",TextWrapping=TextWrapping.Wrap});
+        foreach(string line in new[]{
+            "The game may refuse to start, crash, or kick you from online sessions.",
+            "Your account can be banned. The game's developer decides, often days or weeks later, and bans can be permanent. Some anti-cheats ban the whole PC (hardware ban), so a new account doesn't help.",
+            "Single-player, offline or practice modes don't protect you while the anti-cheat runs.",
+            "Neither Arc Cache nor its developers can undo or appeal a ban.",
+            "Use default settings removes the driver copy, but it can't take back anything the anti-cheat already reported."})
+            panel.Children.Add(new TextBlock{Text="• "+line,TextWrapping=TextWrapping.Wrap});
+        var check=new CheckBox{Content=new TextBlock{Text="I understand that my account can be banned because of this, and that it can't be undone.",TextWrapping=TextWrapping.Wrap}};panel.Children.Add(check);
+        panel.Children.Add(new TextBlock{Text="Type BAN RISK to continue",FontWeight=Microsoft.UI.Text.FontWeights.SemiBold});
+        var input=new TextBox{PlaceholderText="BAN RISK",MaxLength=8,Width=220,HorizontalAlignment=HorizontalAlignment.Left};panel.Children.Add(input);
+        var dialog=new ContentDialog{XamlRoot=Root.XamlRoot,Title=new TextBlock{Text=$"Use Arc Cache with {game.Name} anyway?",Foreground=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,255,105,105)),FontSize=22,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,TextWrapping=TextWrapping.Wrap},Content=new ScrollViewer{Content=panel,MaxHeight=460},PrimaryButtonText="Accept the risk",CloseButtonText="Cancel",DefaultButton=ContentDialogButton.Close,IsPrimaryButtonEnabled=false,RequestedTheme=Root.RequestedTheme};
+        void Update(){dialog.IsPrimaryButtonEnabled=check.IsChecked==true&&string.Equals(input.Text.Trim(),"BAN RISK",StringComparison.Ordinal);}
+        check.Checked+=(_,_)=>Update();check.Unchecked+=(_,_)=>Update();input.TextChanged+=(_,_)=>Update();
+        if(await dialog.ShowAsync()!=ContentDialogResult.Primary)return;
+        overrides.Set(game.Key);Log($"Anti-cheat risk accepted for {game.Name} ({name}). Arc Cache now allows its setup; the account can be banned.");
+        if(selected?.Key==game.Key){if(!game.Supported)discoveryTimer.Start();RenderMyGames();}
+    }
+    void RevokeAntiCheatRisk(object sender,RoutedEventArgs e){
+        if(PreviewOnlyFeedback()||selected is null||overrides is null)return;overrides.Clear(selected.Key);
+        Log($"Anti-cheat risk no longer accepted for {selected.Name}."+(selectedReceipt is not null&&selectedReceipt.Status!="removed"?" Choose Use default settings to remove its driver copy.":""));RenderMyGames();
     }
     string ListBadge(SteamGame game){
         if(developerMyGamesPreview)return selected?.Key==game.Key?myGamesPageState?.ListBadge??string.Empty:string.Empty;
@@ -329,7 +363,8 @@ public partial class MainWindow : Window {
             LibraryCount.Text=$"{visible.Length} of {games.Count} games";LibraryEmptyState.Visibility=Visibility.Collapsed;SearchEmptyState.Visibility=games.Count>0&&visible.Length==0?Visibility.Visible:Visibility.Collapsed;GamesList.Visibility=visible.Length==0?Visibility.Collapsed:Visibility.Visible;
         }finally{synchronizingSelection=false;}
     }
-    void StatusFilterChanged(object sender,SelectionChangedEventArgs e){if(GameStatusFilter is null||busy)return;Filter();}
+    // Filtering only changes what the list shows, so it works while a check runs in the background.
+    void StatusFilterChanged(object sender,SelectionChangedEventArgs e){if(GameStatusFilter is null||GamesList is null)return;Filter();}
     void FillGraphics(JsonElement data) {
         fillingGraphics=true;try{
             var choices=data.GetProperty("Adapters").Deserialize<GraphicsChipChoice[]>()??[];GraphicsChoice.ItemsSource=choices;
@@ -535,7 +570,9 @@ public partial class MainWindow : Window {
                 LoadResult:EffectiveLoadResult(),LaunchLabel:LaunchThroughLabel(),CacheSize:CacheLabel(chosen),AvailableSizes:CacheSizesForGame(),AppliedChoiceMatches:selectedReceipt?.MiB==chosen,TrialNeedsRetest:setupState?.TrialNeedsRetest==true,DiscoveryMessage:discoveryMessage,SizeVerified:setupState?.Configured==true&&selectedReceipt?.MiB>512&&selectedReceipt.Status=="size-loading-verified",
                 ModBlocker:selected?.Key==activeModBlockerGameKey?activeModBlocker:null,
                 RequiresTrialProfile:TrialMode,TrialProfileFound:selected?.TrialProfileReady==true,
-                AntiCheatSeen:selected is null?null:sightings?.Get(selected.Key));
+                AntiCheatSeen:selected is null?null:sightings?.Get(selected.Key),
+                AntiCheatFiles:selected is not null&&antiCheatHints.TryGetValue(selected.Key,out var acFiles)&&acFiles.AlwaysOn?acFiles:null,
+                AntiCheatOverride:selected is null?null:overrides?.Get(selected.Key));
         }
         var state=MyGamesPageStates.Resolve(input);
         if(myGamesChangeStep==2&&state.Step2Complete)state=state with{HeaderStatus="Set up · launch to check",ListBadge="Set up",Step2Result="Ready to check again",Step2Body="Start the game in DirectX 12. Arc Cache checks its loaded driver.",Step2Complete=false,Step3Result="Waiting for step 2",Step3Body="",Step3Complete=false,ExpandedStep=2,ShowSizeChoices=false,ShowSizeApply=false,ShowStep2Launch=true,ShowStep3Launch=false,AccentButton=input.LaunchLabel,AccentAction=MyGamesAction.Launch,Warning=null};
@@ -546,7 +583,7 @@ public partial class MainWindow : Window {
         GameFlowCard.Visibility=state.ShowGameFlow?Visibility.Visible:Visibility.Collapsed;
         GraphicsGateCard.Visibility=state.ShowGraphicsGate?Visibility.Visible:Visibility.Collapsed;
         GameHeaderCard.Visibility=selected is null?Visibility.Collapsed:Visibility.Visible;
-        bool message=state.ShowEmptyLibrary||state.ShowNoSelection||state.Key is "dx12-unavailable" or "game-uninstalled" or "problem-recovery" or "size-retest-required" or "blocked-by-another-mod" or "setup-needs-attention";
+        bool message=state.ShowEmptyLibrary||state.ShowNoSelection||state.Key is "dx12-unavailable" or "game-uninstalled" or "problem-recovery" or "size-retest-required" or "blocked-by-another-mod" or "setup-needs-attention" or "anticheat-running" or "anticheat-files" or "anticheat-with-copy";
         LibraryMessageCard.Visibility=message?Visibility.Visible:Visibility.Collapsed;
         LibraryMessageTitle.Text=state.HeaderStatus;
         LibraryMessageText.Text=state.Warning??(state.ShowNoSelection?"Select a game from the list to see its setup steps.":state.ShowEmptyLibrary?"Add a game to start setting up game-specific driver copies.":string.Empty);
@@ -555,6 +592,11 @@ public partial class MainWindow : Window {
         LibraryMessageButton.Content=state.AccentButton;LibraryMessageButton.Visibility=state.AccentButton.Length>0?Visibility.Visible:Visibility.Collapsed;LibraryMessageButton.IsEnabled=!busy;
         MyGamesAdvancedCard.Visibility=state.ShowEmptyLibrary||state.ShowNoSelection||state.Key is "blocked-by-another-mod" or "setup-needs-attention"?Visibility.Collapsed:Visibility.Visible;
         BlockerCheckAgainLink.Visibility=state.Key=="blocked-by-another-mod"?Visibility.Visible:Visibility.Collapsed;
+        AntiCheatOverrideButton.Visibility=state.Key is "anticheat-running" or "anticheat-files" or "anticheat-with-copy"?Visibility.Visible:Visibility.Collapsed;AntiCheatOverrideButton.IsEnabled=!busy;
+        AntiCheatOverrideButton.Content=state.Key=="anticheat-with-copy"?"Keep using the driver copy anyway…":"Use Arc Cache with this game anyway…";
+        var accepted=selected is null?null:overrides?.Get(selected.Key);
+        AntiCheatOverrideBar.IsOpen=accepted is not null;
+        if(accepted is not null&&selected is not null){string who=input.AntiCheatSeen?.Name??input.AntiCheatFiles?.Name??(antiCheatHints.TryGetValue(selected.Key,out var acHint)&&acHint.Level is AntiCheatLevel.AlwaysOn or AntiCheatLevel.Optional?acHint.Name:"An anti-cheat");AntiCheatOverrideBar.Message=$"You accepted the risk on {accepted.Value.ToLocalTime():g}. {who} can see this game's changed driver file and your account can be banned, even in single-player. Arc Cache can't undo a ban.";}
         FlowWarningBorder.Visibility=string.IsNullOrWhiteSpace(state.Warning)||state.Key is "problem-normal-driver" or "problem-size-normal-driver" or "problem-check-failed"?Visibility.Collapsed:Visibility.Visible;
         FlowWarningText.Text=state.Warning??string.Empty;
         GameStep1Mark.Text=state.Step1Complete?"✓":"1";GameStep2Mark.Text=state.Step2Complete?"✓":"2";GameStep3Mark.Text=state.Step3Complete?"✓":"3";
@@ -1043,7 +1085,7 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
     void SetHomeEyebrowTone(bool attention,bool ready){var color=attention?Windows.UI.Color.FromArgb(255,250,190,95):ready?Windows.UI.Color.FromArgb(255,127,225,174):Windows.UI.Color.FromArgb(255,180,180,180);HomeSetupLabel.Foreground=new Microsoft.UI.Xaml.Media.SolidColorBrush(color);}
     async void RefreshGame(object sender,RoutedEventArgs e){if(PreviewOnlyFeedback())return;await Run("Refreshing installed setup…",ShowGame);}
     async void RefreshLibrary(object sender,RoutedEventArgs e){if(PreviewOnlyFeedback())return;await Run("Refreshing installed games…",LoadLibrary);}
-    void SearchChanged(AutoSuggestBox sender,AutoSuggestBoxTextChangedEventArgs args){if(!busy)Filter();}
+    void SearchChanged(AutoSuggestBox sender,AutoSuggestBoxTextChangedEventArgs args){if(GamesList is not null)Filter();}
     async void GameSelected(object sender,SelectionChangedEventArgs e){if(busy||synchronizingSelection||PreviewOnlyFeedback())return;var next=GamesList.SelectedItem as SteamGame;if(next?.Key==selected?.Key)return;selected=next;myGamesChangeStep=0;gameLoadResult=MyGamesLoadResult.Unknown;if(next!=null)try{store.MarkRecentGame(next.Key);}catch(Exception error){Log("Could not save recent game: "+error.Message);}await Run("Checking this game's setup…",ShowGame);}
     async void InspectDriver(object sender,RoutedEventArgs e){if(PreviewOnlyFeedback())return;await CheckTrialSupport(true);}
     async void CheckSelectedChip(object sender,RoutedEventArgs e){
