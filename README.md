@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/nyannoying1337/ArcCache/releases/latest"><img src="https://img.shields.io/badge/download-Windows_x64-36bff5?style=flat-square" alt="Windows x64 download" /></a>
-  <img src="https://img.shields.io/badge/release-2026.10.16-36bff5?style=flat-square" alt="Release 2026.10.16" />
+  <img src="https://img.shields.io/badge/release-2026.10.17-36bff5?style=flat-square" alt="Release 2026.10.17" />
   <img src="https://img.shields.io/badge/interface-WinUI_3-627d98?style=flat-square" alt="WinUI 3" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-7596b3?style=flat-square" alt="GPL-3.0-or-later" /></a>
 </p>
@@ -30,6 +30,16 @@ Games compile shaders while you play, which causes stutter. The graphics driver 
 
 Arc Cache raises that limit **for the games you choose**. Together with [SCSKiller](docs/SCSKILLER.md), which compiles a game's shaders before you play, the whole shader set can stay on disk.
 
+## What's new in 2026.10.17
+
+- **No stutter from Arc Cache while you play.** Once the game's driver copy is confirmed, Arc Cache only checks every 15 seconds that the game still runs, with no extra process or driver hashing.
+- **Faster checks.** File hashes use Windows' own fast SHA-256, and unchanged files aren't hashed again just to show a page.
+- **The right cache file.** Arc Cache and the overlay ask Windows which cache file the running game has open, instead of guessing from file growth. A compile no longer re-links the game to its separate D3D11 file.
+- **Overlay:** "GOOD" only appears when the game's driver copy is loaded; with the normal driver it warns.
+- **Interrupted changes repair themselves:** leftovers of a stopped size change or removal are cleaned up (only Arc Cache's own files) before the next action.
+- **SCSKiller runs in the background:** the app stays usable during a compile, and closing asks before stopping it.
+- **Uninstall warns** while games still have a driver copy. Long install paths and broken manual library entries no longer cause problems.
+
 ## What's new in 2026.10.16
 
 - **Works with your current driver.** Sizes are no longer tied to one reviewed driver file. Arc Cache finds the cache code in the installed driver and tests every size on your PC before it offers it. Tested: Arc B580, driver 32.0.101.9150, all sizes up to 16 GB.
@@ -45,8 +55,8 @@ Arc Cache raises that limit **for the games you choose**. Together with [SCSKill
 
 Get the latest release on the [**Releases page**](https://github.com/nyannoying1337/ArcCache/releases/latest):
 
-- **`ArcCache-Setup-2026.10.16-Windows-x64.exe`**: the installer, recommended. It installs for your Windows account only (no admin rights needed), adds a Start menu entry and updates an older Arc Cache in place.
-- **`ArcCache-2026.10.16-Windows-x64.zip`**: the portable version. Extract the **whole** ZIP and run `ArcCache.exe`.
+- **`ArcCache-Setup-2026.10.17-Windows-x64.exe`**: the installer, recommended. It installs for your Windows account only (no admin rights needed), adds a Start menu entry and updates an older Arc Cache in place.
+- **`ArcCache-2026.10.17-Windows-x64.zip`**: the portable version. Extract the **whole** ZIP and run `ArcCache.exe`.
 
 Each file has a `.sha256` next to it. Both are unsigned, so Windows SmartScreen may ask once. Arc Cache is self-contained, so you don't need .NET or anything else. It needs Windows 10 19041 or newer (tested on Windows 11) and an Intel Arc or Intel Xe graphics driver. A matching SCSKiller build is included in the `SCSKiller` folder.
 
