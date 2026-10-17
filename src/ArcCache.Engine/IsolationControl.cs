@@ -9,7 +9,7 @@ using Microsoft.Win32;
 namespace ArcCap {
 public class OverrideReceipt {
     public int Schema {get;set;}public bool WasPresent {get;set;}public int Before {get;set;}
-    public string Status {get;set;}public string CreatedUtc {get;set;}
+    public string Status {get;set;}public string CreatedUtc {get;set;}public string RestoredUtc {get;set;}
 }
 public class PrivateCopyReceipt {
     public int Schema {get;set;}public string Executable {get;set;}public string ExecutableHash {get;set;}
@@ -100,7 +100,7 @@ public static class IsolationControl {
             if(receipt.WasPresent)key.SetValue("DevOverrideEnable",receipt.Before,RegistryValueKind.DWord);else key.DeleteValue("DevOverrideEnable",false);
             key.Flush();object restored=key.GetValue("DevOverrideEnable",null);
             if(receipt.WasPresent?restored==null||Convert.ToInt32(restored)!=receipt.Before:restored!=null)throw new IOException("Restored setting did not pass read-back. Keep the receipt for recovery.");
-            receipt.Status="restored-reboot-required";Save(ReceiptPath,receipt);
+            receipt.Status="restored-reboot-required";receipt.RestoredUtc=DateTime.UtcNow.ToString("O");Save(ReceiptPath,receipt);
             return "Original developer-override setting restored. REBOOT REQUIRED.\r\nThe game-specific .local copy is separate; remove it using its saved receipt. Installed driver unchanged.";
         }
     }

@@ -30,6 +30,7 @@ public partial class MainWindow : Window {
     int introductionIndex;
     bool introductionVisible;
     bool busy,driverOriginal,routingReady,receiptValid,recordValid;
+    bool isAdministrator,routingTurnOffAvailable,routingTurnOffRestart,windowsManageOpen;string[] gamesUsingCopies=[];long driverTestsBytes=-1;
     string? steamRoot;
     Process? cacheMonitor;
     bool safetyAllowed;
@@ -103,7 +104,7 @@ public partial class MainWindow : Window {
         diagnostics=new DiagnosticLog(store.Root,Environment.GetCommandLineArgs().Contains("--debug"));
         safety.Diagnostic=diagnostics.Write;initializingDiagnostics=true;DiagnosticToggle.IsOn=diagnostics.Enabled;initializingDiagnostics=false;
         diagnostics.Write("session-start",new{Version=typeof(MainWindow).Assembly.GetName().Version?.ToString(),OS=Environment.OSVersion.ToString(),Runtime=Environment.Version.ToString(),Variant=typeof(MainWindow).Assembly.GetName().Name});
-        Root.Loaded+=async (_,_)=>{await Run("Reading your game libraries…",LoadLibrary);if(!preview){driverWatchTimer.Start();if(new Introduction(store.Root).ShouldShow)ShowIntroduction();}};
+        Root.Loaded+=async (_,_)=>{await Run("Reading your game libraries…",LoadLibrary);if(!preview){driverWatchTimer.Start();if(new Introduction(store.Root).ShouldShow)ShowIntroduction();else if(Environment.GetCommandLineArgs().Contains("--open-graphics"))NavigateTo("Driver");}};
         driverWatchTimer.Tick+=async (_,_)=>await CheckDriverChanged();
         Activated+=async (_,e)=>{if(e.WindowActivationState!=WindowActivationState.Deactivated)await CheckDriverChanged();};
         discoveryTimer.Tick+=async (_,_)=>await PollGame();
@@ -204,7 +205,10 @@ public partial class MainWindow : Window {
         };
     }
     void ShowIntroduction(){introductionIndex=0;introductionVisible=true;Nav.IsEnabled=false;WelcomePanel.Visibility=Visibility.Visible;RenderIntroduction();}
-    void RenderIntroduction(){var screen=Introduction.Screens[introductionIndex];WelcomeTitle.Text=screen.Title;WelcomeBody.Text=screen.Body;WelcomeCount.Text="HOW IT WORKS";WelcomeBack.Visibility=Visibility.Collapsed;WelcomeNext.Content=introductionIndex==Introduction.Screens.Length-1?"Go to Arc Cache":"Next";WelcomeNext.Focus(FocusState.Programmatic);}
+    void RenderIntroduction(){var screen=Introduction.Screens[introductionIndex];WelcomeTitle.Text=screen.Title;WelcomeBody.Text=screen.Body;WelcomeCount.Text=$"HOW IT WORKS · {introductionIndex+1} OF {Introduction.Screens.Length}";
+        WelcomePoints.Children.Clear();bool numbered=screen.Points.All(point=>point.Length>1&&char.IsDigit(point[0]));foreach(string point in screen.Points)WelcomePoints.Children.Add(new TextBlock{Text=numbered?point:"•  "+point,TextWrapping=TextWrapping.Wrap,FontWeight=numbered?Microsoft.UI.Text.FontWeights.SemiBold:Microsoft.UI.Text.FontWeights.Normal});
+        WelcomePointsBox.Visibility=screen.Points.Length>0?Visibility.Visible:Visibility.Collapsed;WelcomeNote.Text=screen.Note;WelcomeNote.Visibility=screen.Note.Length>0?Visibility.Visible:Visibility.Collapsed;
+        WelcomeBack.Visibility=introductionIndex>0?Visibility.Visible:Visibility.Collapsed;WelcomeNext.Content=introductionIndex==Introduction.Screens.Length-1?"Go to Arc Cache":"Next";WelcomeNext.Focus(FocusState.Programmatic);}
     async void FinishIntroduction(bool graphics){if(!preview)try{new Introduction(store.Root).Dismiss();}catch(Exception error){Log("Introduction preference could not be saved: "+error.Message);}introductionVisible=false;WelcomePanel.Visibility=Visibility.Collapsed;Nav.IsEnabled=!busy;if(graphics){NavigateTo("Driver");await CheckTrialSupport();}}
     void ReplayIntroduction(object sender,RoutedEventArgs e){if(!busy)ShowIntroduction();}
     async void ReviewDriverTestCleanup(object sender,RoutedEventArgs e){
@@ -217,12 +221,13 @@ public partial class MainWindow : Window {
             if(count==0){await new ContentDialog{XamlRoot=Root.XamlRoot,Title="Driver tests",Content=message,CloseButtonText="Close",RequestedTheme=Root.RequestedTheme}.ShowAsync();return;}
             if(!await Confirm("Clean up old driver tests?",message+" Each selected folder will be checked again before removal. No game setup or shader cache will be changed.","Clean up"))return;
             await Run("Cleaning up old driver tests…",async()=>{var result=await Engine(new WorkerRequest("CleanupDriverTests",Confirmed:true));int removed=result.Data.GetProperty("RemovedFolders").GetArrayLength();long freed=result.Data.GetProperty("BytesFreed").GetInt64();int errors=result.Data.GetProperty("Errors").GetArrayLength();GlobalNotice.Severity=errors==0?InfoBarSeverity.Success:InfoBarSeverity.Warning;GlobalNotice.Title="Driver-test cleanup finished";GlobalNotice.Message=$"Removed {removed} folder{(removed==1?"":"s")}; freed {freed/1073741824.0:0.0} GB."+(errors==0?"":" Some folders were left in place because their contents changed.");GlobalNotice.IsOpen=true;});
+            await MeasureDriverTests();
         }catch(Exception error){Log("Driver-test cleanup review failed: "+error.Message);GlobalNotice.Severity=InfoBarSeverity.Warning;GlobalNotice.Title="Cleanup could not be reviewed";GlobalNotice.Message=PlainLanguage.Error(error.Message);GlobalNotice.IsOpen=true;}
     }
     async void ResetArcCache(object sender,RoutedEventArgs e){
         if(PreviewOnlyFeedback()||busy||ScsBlocks("reset Arc Cache"))return;
         var panel=new StackPanel{Spacing=8};
-        foreach(string line in new[]{"Every game is returned to default by removing only driver copies recorded by Arc Cache.","The saved Windows game-specific setting is restored. Restarting Windows may be needed.","All old driver tests are deleted (they may use 55–60 GB).","Saved setups, profiles, reports, backups, icons, recent games, manual games and old logs are deleted. The current session log is kept.","Arc Cache starts fresh. This can't be undone.","If a game is running or a game folder contains changed or unfamiliar files, reset stops before restoring Windows or deleting Arc Cache data; it shows the folder that needs attention."})panel.Children.Add(new TextBlock{Text="• "+line,TextWrapping=TextWrapping.Wrap});
+        foreach(string line in new[]{"Every game is returned to default by removing only driver copies recorded by Arc Cache.","The saved Windows game-specific setting is restored. Restarting Windows may be needed.",driverTestsBytes>0?$"All driver tests are deleted ({driverTestsBytes/1073741824.0:0.0} GB in {DriverTestsFolder}).":"All driver tests are deleted.","Saved setups, profiles, reports, backups, icons, recent games, manual games and old logs are deleted. The current session log is kept.","Arc Cache starts fresh. This can't be undone.","If a game is running or a game folder contains changed or unfamiliar files, reset stops before restoring Windows or deleting Arc Cache data; it shows the folder that needs attention."})panel.Children.Add(new TextBlock{Text="• "+line,TextWrapping=TextWrapping.Wrap});
         panel.Children.Add(new TextBlock{Text="Type RESET to continue",FontWeight=Microsoft.UI.Text.FontWeights.SemiBold});
         var input=new TextBox{PlaceholderText="RESET",MaxLength=5,Width=220};panel.Children.Add(input);
         var dialog=new ContentDialog{XamlRoot=Root.XamlRoot,Title=new TextBlock{Text="Reset everything?",Foreground=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,255,105,105)),FontSize=22,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold},Content=panel,PrimaryButtonText="Reset everything",CloseButtonText="Cancel",DefaultButton=ContentDialogButton.Close,IsPrimaryButtonEnabled=false,RequestedTheme=Root.RequestedTheme};
@@ -315,7 +320,7 @@ public partial class MainWindow : Window {
             bool routingEnabled=d.GetProperty("DeveloperOverride").GetBoolean();bool routingReboot=d.GetProperty("RebootRequired").GetBoolean();
             routingReady=routingEnabled&&!routingReboot;
             if(d.TryGetProperty("SmartAppControl",out var sac)&&sac.ValueKind==JsonValueKind.Number&&sac.GetInt32()==1&&!smartAppControlNoted){smartAppControlNoted=true;Log("Smart App Control is on. Windows may block the changed Intel driver file in a game's driver copy; this hasn't been tested. If a set-up game fails to start, use default settings for it.");}
-            EnableRouteButton.IsEnabled=(driverOriginal||successfulTrial!=null||!string.IsNullOrWhiteSpace(d.GetProperty("Version").GetString()))&&!routingEnabled&&!routingReboot;RestoreRouteButton.IsEnabled=routingEnabled&&!routingReboot;
+            EnableRouteButton.IsEnabled=(driverOriginal||successfulTrial!=null||!string.IsNullOrWhiteSpace(d.GetProperty("Version").GetString()))&&!routingEnabled&&!routingReboot;ApplyRoutingFacts(d);
             homeAdapter=d.GetProperty("Adapter").GetString()??"Intel graphics";homeVersion=d.GetProperty("Version").GetString()??"";
             // FillTrial resets trialEligible while it rebuilds the file list. Keep the Status
             // inspection result when it describes the selected file; otherwise inspect again.
@@ -347,7 +352,7 @@ public partial class MainWindow : Window {
             DriverUpdateNotice.Message=driverOriginal?"The installed files match a supported version. Your game setup can be checked against this version.":"Your saved setup may use an older driver. Check support before using it again, or return the game to default settings. Its shader cache will not be deleted.";
             RenderGraphicsPage();
             if(selected!=null)RenderSetup();UpdateButtons();RenderMyGames();RefreshHome();
-        }catch(Exception e){EnableRouteButton.IsEnabled=false;RestoreRouteButton.IsEnabled=false;bool noIntel=e.Message.Contains("no Intel",StringComparison.OrdinalIgnoreCase)||e.Message.Contains("Intel graphics device was not found",StringComparison.OrdinalIgnoreCase);graphicsCheckState=noIntel?GraphicsCheckState.NoIntel:GraphicsCheckState.Failed;graphicsDriverState=noIntel?GraphicsDriverState.Unsupported:GraphicsDriverState.Unknown;graphicsWindowsState=GraphicsWindowsState.Error;DriverSummary.Text=PlainLanguage.Error(e.Message);DriverUpdateNotice.IsOpen=true;DriverUpdateNotice.Title="Graphics check could not finish";DriverUpdateNotice.Message="Finish installing the graphics driver, then check again. Saved game setups can still be returned to default settings.";Log("Driver inspection stopped: "+e.Message);RenderGraphicsPage();if(selected!=null)RenderSetup();UpdateButtons();RenderMyGames();RefreshHome();}
+        }catch(Exception e){EnableRouteButton.IsEnabled=false;bool noIntel=e.Message.Contains("no Intel",StringComparison.OrdinalIgnoreCase)||e.Message.Contains("Intel graphics device was not found",StringComparison.OrdinalIgnoreCase);graphicsCheckState=noIntel?GraphicsCheckState.NoIntel:GraphicsCheckState.Failed;graphicsDriverState=noIntel?GraphicsDriverState.Unsupported:GraphicsDriverState.Unknown;graphicsWindowsState=GraphicsWindowsState.Error;DriverSummary.Text=PlainLanguage.Error(e.Message);DriverUpdateNotice.IsOpen=true;DriverUpdateNotice.Title="Graphics check could not finish";DriverUpdateNotice.Message="Finish installing the graphics driver, then check again. Saved game setups can still be returned to default settings.";Log("Driver inspection stopped: "+e.Message);RenderGraphicsPage();if(selected!=null)RenderSetup();UpdateButtons();RenderMyGames();RefreshHome();}
     }
     bool LimitAvailable(int mib)=>DriverLimitChoices.IsAvailable(mib,limitCapabilities,TrialMode||selectedReceipt?.Trial==true);
     string CapabilitySummary(){
@@ -866,7 +871,7 @@ public partial class MainWindow : Window {
         Step1Mark.Text=state.Step1Complete?"✓":"1";Step2Mark.Text=state.Step2Complete?"✓":"2";Step3Mark.Text=state.Step3Complete?"✓":"3";
         Step1Result.Text=state.Step1Result;Step2Result.Text=state.Step2Result;RenderStep3Result(state,copyState);
         bool hasStep1Details=!string.IsNullOrWhiteSpace(state.Step1Body)||state.ShowChipPicker;
-        Step1Details.Visibility=state.Step1Expanded&&hasStep1Details?Visibility.Visible:Visibility.Collapsed;Step2Details.Visibility=state.Step2Expanded?Visibility.Visible:Visibility.Collapsed;Step3Details.Visibility=state.Step3Expanded?Visibility.Visible:Visibility.Collapsed;
+        Step1Details.Visibility=state.Step1Expanded&&hasStep1Details?Visibility.Visible:Visibility.Collapsed;Step2Details.Visibility=state.Step2Expanded||windowsManageOpen&&state.Step2Complete?Visibility.Visible:Visibility.Collapsed;Step3Details.Visibility=state.Step3Expanded?Visibility.Visible:Visibility.Collapsed;
         DriverSummary.Text=state.Step1Body;SupportProgress.Visibility=input.Check is GraphicsCheckState.Running or GraphicsCheckState.NotRun?Visibility.Visible:Visibility.Collapsed;SupportProgress.IsActive=SupportProgress.Visibility==Visibility.Visible;
         GraphicsChoice.Visibility=state.ShowChipPicker?Visibility.Visible:Visibility.Collapsed;GraphicsChoice.IsEnabled=!busy;
         CheckChipButton.Visibility=state.PrimaryAction==GraphicsPrimaryAction.CheckSelectedChip?Visibility.Visible:Visibility.Collapsed;CheckChipButton.Content=state.AccentButton;CheckChipButton.IsEnabled=!busy;
@@ -879,7 +884,7 @@ public partial class MainWindow : Window {
         bool anotherSize=trialLimitCapabilities.Values.Any(c=>c.MiB>512&&c.Buildable&&!c.Tested);Step3ChangeLink.Content=anotherSize?"Test another size":"Details";Step3ChangeLink.Visibility=state.Step3Complete&&anotherSize?Visibility.Visible:Visibility.Collapsed;TrialSizeChoice.Visibility=state.Step3Expanded&&!state.Step3Complete&&TrialSizeChoice.Items.Count>0?Visibility.Visible:Visibility.Collapsed;RenderTrialSizeGuidance(testSize);TrialSizeReason.Visibility=state.Step3Expanded&&!state.Step3Complete&&TrialSizeReason.Text.Length>0?Visibility.Visible:Visibility.Collapsed;TrialRamWarning.Visibility=state.Step3Expanded&&!state.Step3Complete&&testSize>=8192?Visibility.Visible:Visibility.Collapsed;
         bool hasTrialFiles=developerStatePreview?copyState is GraphicsCopyTestState.Passed or GraphicsCopyTestState.Failed or GraphicsCopyTestState.Stopped:Directory.Exists(Path.Combine(store.Root,"driver-trials"));
         TrialFileSelector.Visibility=input.Driver==GraphicsDriverState.UncheckedTestable&&!state.Step3Complete?Visibility.Visible:Visibility.Collapsed;TrialFile.IsEnabled=!busy;
-        TrialFilesButton.Visibility=hasTrialFiles&&!developerStatePreview?Visibility.Visible:Visibility.Collapsed;DiscardTrialButton.Visibility=hasTrialFiles&&!developerStatePreview?Visibility.Visible:Visibility.Collapsed;RestoreRouteButton.Visibility=input.Windows==GraphicsWindowsState.On&&!developerStatePreview?Visibility.Visible:Visibility.Collapsed;
+        TrialFilesButton.Visibility=hasTrialFiles&&!developerStatePreview?Visibility.Visible:Visibility.Collapsed;DiscardTrialButton.Visibility=hasTrialFiles&&!developerStatePreview?Visibility.Visible:Visibility.Collapsed;RenderWindowsSetting();
         DriverCopyActionReason.Text=developerStatePreview?"Preview only. No test files or recovery records were created.":hasTrialFiles?string.Empty:"No driver copy is present.";DriverCopyActionReason.Visibility=developerStatePreview||!hasTrialFiles?Visibility.Visible:Visibility.Collapsed;
         DriverCopyStatus.Text=copyState switch{GraphicsCopyTestState.Passed=>$"The driver copy passed. Available cache sizes: {state.CacheSizes}. The installed driver stays unchanged.",GraphicsCopyTestState.Failed=>"The driver-copy test did not pass. No game files were changed.",GraphicsCopyTestState.Stopped=>"The driver-copy test stopped. No game files were changed.",_=>"A driver copy keeps the installed Windows driver unchanged."};
         DriverWarning.IsOpen=state.ShowAmberDriverNote&&state.Step3Expanded;DriverWarning.Title="Not pre-reviewed by Arc Cache";DriverWarning.Message=copyState is GraphicsCopyTestState.Failed or GraphicsCopyTestState.Stopped?"This exact driver hasn't been reviewed by Arc Cache.":"This exact driver hasn't been reviewed by Arc Cache. Test its driver copy before using it for a game.";
@@ -905,6 +910,7 @@ public partial class MainWindow : Window {
             try{
                 var reply=await Engine(new("TryDriverTrial",DriverFile:selectedDriverFile,MiB:requestedSize,Confirmed:true,RiskConfirmed:true),driverTrialCancellation.Token);
                 bool passed=reply.Data.GetProperty("Passed").GetBoolean();TrialProgress.Value=100;TrialProgress.IsIndeterminate=false;trialProgressPercent=100;trialProgressStage="Done";TrialStage.Text="Done";TrialFilesButton.IsEnabled=true;TrialLog.Text+=JsonSerializer.Serialize(reply.Data,new JsonSerializerOptions{WriteIndented=true})+Environment.NewLine;
+                if(passed&&reply.Data.TryGetProperty("Cleanup",out var cleanup)&&cleanup.ValueKind==JsonValueKind.Object){int removedTests=cleanup.GetProperty("RemovedFolders").GetArrayLength();if(removedTests>0)Log($"Removed {removedTests} older driver test{(removedTests==1?"":"s")} and freed {cleanup.GetProperty("BytesFreed").GetInt64()/1073741824.0:0.0} GB. The newest passing test for each cache size and the tests your games use are kept.");}
                 if(passed){var tested=reply.Data.GetProperty("Patched");successfulTrialDriver=tested.GetProperty("Driver").GetString()??reply.Data.GetProperty("Control").GetProperty("LoadedCacheDriver").GetString()??file.Name;successfulTrial=tested.GetProperty("Receipt").GetString()??reply.Data.GetProperty("Control").GetProperty("Receipt").GetString();graphicsCopyTestState=GraphicsCopyTestState.Passed;await LoadDriver(true);await InspectTrial();}
                 else{graphicsCopyTestState=GraphicsCopyTestState.Failed;TrialSummary.Text="Arc Cache could not verify the driver copy. Test again or use the default settings.";RenderGraphicsPage();}
             }catch(OperationCanceledException){
@@ -920,7 +926,7 @@ public partial class MainWindow : Window {
     void OpenDriverDownloads(object sender,RoutedEventArgs e){if(PreviewOnlyFeedback())return;Process.Start(new ProcessStartInfo("https://www.intel.com/content/www/us/en/download-center/home.html"){UseShellExecute=true});}
     async Task CheckTrialSupport(bool showStatus=false){if(busy||closing)return;SupportProgress.Visibility=Visibility.Visible;SupportProgress.IsActive=true;await Run("Checking your Intel graphics…",async()=>{try{await LoadDriver(true);if(TrialFile.SelectedItem is TrialFileChoice choice&&!String.Equals(choice.Name,loadedCapabilityDriver,StringComparison.OrdinalIgnoreCase))await InspectTrial();}finally{SupportProgress.IsActive=false;SupportProgress.Visibility=Visibility.Collapsed;RenderGraphicsPage();}},showStatus);}
     void OpenAdvancedChip(object sender,RoutedEventArgs e){chipChoiceConfirmed=false;RenderGraphicsPage();Step1Card.StartBringIntoView();}
-    void OpenAdvancedRouting(object sender,RoutedEventArgs e){GraphicsAdvanced.IsExpanded=true;RestoreRouteButton.Focus(FocusState.Programmatic);}
+    void OpenAdvancedRouting(object sender,RoutedEventArgs e){windowsManageOpen=!windowsManageOpen;RenderGraphicsPage();if(windowsManageOpen)DisableRouteButton.StartBringIntoView();}
     void OpenAdvancedTrial(object sender,RoutedEventArgs e){var next=limitCapabilities.Values.Where(c=>c.MiB>512&&c.Buildable&&!c.Tested).OrderBy(c=>c.MiB).FirstOrDefault();if(next!=null){fillingTrial=true;TrialSizeChoice.SelectedItem=TrialSizeChoice.Items.OfType<ComboBoxItem>().FirstOrDefault(i=>i.Tag?.ToString()==next.MiB.ToString());fillingTrial=false;graphicsCopyTestState=GraphicsCopyTestState.NotRun;RenderGraphicsPage();TrialCard.StartBringIntoView();}else{GraphicsAdvanced.IsExpanded=true;DriverCopySection.StartBringIntoView();}}
     void FollowGameGuide(object sender,RoutedEventArgs e){if(busy||gameGuide==null)return;switch(gameGuide.Action){case "Graphics":case "Settings":NavigateTo("Driver");break;case "Restore":RestoreGame(sender,e);break;case "Prepare":case "Apply":ApplyGame(sender,e);break;case "Launch":LaunchGame(sender,e);break;default:RecoveryExpander.IsExpanded=true;break;}}
     void OpenTrialResults(object sender,RoutedEventArgs e){if(PreviewOnlyFeedback())return;string root=Path.Combine(store.Root,"driver-trials");if(Directory.Exists(root))Process.Start(new ProcessStartInfo("explorer.exe"){UseShellExecute=true,ArgumentList={root}});}
@@ -938,7 +944,15 @@ public partial class MainWindow : Window {
         HomePanel.Visibility=tag=="Home"?Visibility.Visible:Visibility.Collapsed;LibraryPanel.Visibility=tag=="Library"?Visibility.Visible:Visibility.Collapsed;DriverPanel.Visibility=tag=="Driver"?Visibility.Visible:Visibility.Collapsed;ActivityPanel.Visibility=tag=="Activity"?Visibility.Visible:Visibility.Collapsed;SettingsPanel.Visibility=tag=="Settings"?Visibility.Visible:Visibility.Collapsed;
         if(tag=="Home"){if(!preview){graphicsStatsTimer.Start();_=GraphicsStats();}}else graphicsStatsTimer.Stop();
         if(tag=="Driver"&&!preview)_=CheckTrialSupport();
+        if(tag=="Settings"){RenderWindowsSetting();if(!preview){_=MeasureDriverTests();if(!busy)_=RefreshWindowsSetting();}}
         if(tag=="Library"){RenderMyGames();if(selected is not null&&(selectedReceipt is not null&&selected.Supported||!selected.Supported))discoveryTimer.Start();}
+    }
+    string DriverTestsFolder=>Path.Combine(store.Root,"driver-trials");
+    async Task MeasureDriverTests(){
+        string folder=DriverTestsFolder;
+        long bytes=await Task.Run(()=>{try{if(!Directory.Exists(folder))return 0L;long total=0;foreach(var file in new DirectoryInfo(folder).EnumerateFiles("*",new EnumerationOptions{RecurseSubdirectories=true,AttributesToSkip=FileAttributes.ReparsePoint,IgnoreInaccessible=true}))total+=file.Length;return total;}catch(Exception){return -1L;}});
+        driverTestsBytes=bytes;int count=0;try{if(Directory.Exists(folder))count=Directory.GetDirectories(folder).Length;}catch(Exception){}
+        DriverTestsSize.Text=bytes<0?"The size of the driver tests could not be measured.":count==0?"No driver tests are saved.":$"{count} driver test{(count==1?"":"s")} use {bytes/1073741824.0:0.0} GB in {folder}";
     }
     void OpenGraphics(object sender,RoutedEventArgs e){if(PreviewOnlyFeedback())return;NavigateTo("Driver");}
     void OpenSettings(object sender,RoutedEventArgs e)=>NavigateTo("Settings");
@@ -1121,14 +1135,62 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
         await Run("Reading the selected Steam folder…",LoadLibrary);
     }
     async void EnableRouting(object sender,RoutedEventArgs e) {
-        if(PreviewOnlyFeedback())return;
-        if(!await Confirm("Allow games to use their own graphics files?","Windows needs this one-time setting so a game can use the separate Intel graphics files Arc Cache prepares for it. The setting affects the whole PC and may affect other apps that use separate graphics files. It does not replace your installed driver or turn off Windows security. Close Arc Cache, open it using Run as administrator, and confirm the change. Restart Windows afterward. Arc Cache saves the previous value so you can restore it.","Allow game-specific graphics files"))return;
-        await Run("Allowing game-specific graphics files…",async()=>{await Engine(new("EnableOverride",Confirmed:true));await LoadDriver(true);await InspectTrial();});
+        if(PreviewOnlyFeedback()||busy)return;
+        string what="Windows needs this one-time setting (DevOverrideEnable) so a game can load the separate Intel graphics files Arc Cache puts in a folder next to it, such as Game.exe.local. Without it, Windows ignores that folder and the game keeps using the installed driver. The setting applies to the whole PC; only programs that have such a folder are affected. It does not replace your installed driver or turn off Windows security. Restart Windows afterward. Arc Cache saves the previous value so you can turn it off again in Settings.";
+        if(!isAdministrator){await ReopenAsAdministrator("Turn on game-specific settings?",what);return;}
+        if(!await Confirm("Turn on game-specific settings?",what,"Turn on"))return;
+        await Run("Turning on game-specific settings…",async()=>{await Engine(new("EnableOverride",Confirmed:true));await LoadDriver(true);await InspectTrial();});
     }
     async void RestoreRouting(object sender,RoutedEventArgs e) {
-        if(PreviewOnlyFeedback())return;
-        if(!await Confirm("Restore the previous Windows setting","To undo one game, choose Use default settings on its page. To turn this Windows setting off, first remove every game-specific graphics copy. Close Arc Cache, open it using Run as administrator, and confirm. Restart Windows afterward. Arc Cache restores the previous value. Your shader caches are not deleted.","Undo the Windows setting"))return;
-        await Run("Undoing the Windows setting…",async()=>{await Engine(new("RestoreOverride",Confirmed:true));await LoadDriver(true);await InspectTrial();});
+        if(PreviewOnlyFeedback()||busy)return;
+        await RefreshWindowsSetting();
+        string? reason=TurnOffBlockedReason();if(reason!=null){await new ContentDialog{XamlRoot=Root.XamlRoot,Title="Game-specific settings stay on",Content=reason,CloseButtonText="Close",RequestedTheme=Root.RequestedTheme}.ShowAsync();return;}
+        string what="Arc Cache puts back the value Windows had before Arc Cache turned this on. No game is using a driver copy anymore, so nothing else changes. Your shader caches are not deleted. Restart Windows afterward. You can turn it on again later.";
+        if(!isAdministrator){await ReopenAsAdministrator("Turn off game-specific settings?",what);return;}
+        if(!await Confirm("Turn off game-specific settings?",what,"Turn off"))return;
+        await Run("Turning off game-specific settings…",async()=>{await Engine(new("RestoreOverride",Confirmed:true));await LoadDriver(true);await InspectTrial();});
+    }
+    void ApplyRoutingFacts(JsonElement d){isAdministrator=d.TryGetProperty("Administrator",out var admin)&&admin.ValueKind==JsonValueKind.True;routingTurnOffAvailable=d.TryGetProperty("TurnOffAvailable",out var turnOff)&&turnOff.ValueKind==JsonValueKind.True;routingTurnOffRestart=d.TryGetProperty("TurnOffRestartRequired",out var offRestart)&&offRestart.ValueKind==JsonValueKind.True;gamesUsingCopies=d.TryGetProperty("GamesUsingCopies",out var copies)&&copies.ValueKind==JsonValueKind.Array?copies.EnumerateArray().Select(x=>GameNameFor(x.GetString()??"")).Distinct(StringComparer.OrdinalIgnoreCase).ToArray():[];}
+    // Games may have been returned to default since the last graphics check; re-read the facts the turn-off decision depends on.
+    async Task RefreshWindowsSetting(){
+        if(preview||developerStatePreview)return;
+        try{var d=(await Engine(new("Status",ReadOnly:true))).Data;ApplyRoutingFacts(d);bool enabled=d.GetProperty("DeveloperOverride").GetBoolean(),reboot=d.GetProperty("RebootRequired").GetBoolean();graphicsWindowsState=reboot?GraphicsWindowsState.RestartRequired:enabled?GraphicsWindowsState.On:GraphicsWindowsState.Off;routingReady=enabled&&!reboot;RenderGraphicsPage();}
+        catch(Exception error){Log("The Windows setting could not be checked: "+error.Message);}
+    }
+    // A game record names its executable (or, when unreadable, the record file); show the library name when the game is known.
+    string GameNameFor(string path){
+        // The set-up executable is often a shipping exe deeper in the folder than the one the library lists, so fall back to the install folder that contains it.
+        var game=games.FirstOrDefault(g=>string.Equals(g.SupportedExecutable,path,StringComparison.OrdinalIgnoreCase)||string.Equals(g.ManualExecutable,path,StringComparison.OrdinalIgnoreCase))
+            ??games.Where(g=>!string.IsNullOrWhiteSpace(g.InstallDirectory)&&path.StartsWith(Path.TrimEndingDirectorySeparator(g.InstallDirectory)+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase)).OrderByDescending(g=>g.InstallDirectory.Length).FirstOrDefault();
+        return game?.Name??Path.GetFileNameWithoutExtension(path);}
+    // Why turning the Windows setting off is not possible right now, or null when it is.
+    string? TurnOffBlockedReason(){
+        if(graphicsWindowsState!=GraphicsWindowsState.On&&graphicsWindowsState!=GraphicsWindowsState.RestartRequired)return "Game-specific settings are already off.";
+        if(!routingTurnOffAvailable)return "This setting was already on before Arc Cache turned it on, so Arc Cache leaves it as it is.";
+        if(gamesUsingCopies.Length>0){string names=gamesUsingCopies.Length<=3?string.Join(", ",gamesUsingCopies):string.Join(", ",gamesUsingCopies.Take(3))+$" and {gamesUsingCopies.Length-3} more";return $"Not possible yet: {names} still use{(gamesUsingCopies.Length==1?"s":"")} a driver copy, and turning this off would stop {(gamesUsingCopies.Length==1?"it":"them")} from loading it. Choose Use default settings for {(gamesUsingCopies.Length==1?"that game":"each of them")} in My games first.";}
+        return null;
+    }
+    // Windows only lets an elevated process change this setting. The user approves the Windows prompt; nothing is elevated silently.
+    async Task ReopenAsAdministrator(string title,string what){
+        if(ScsBlocks("reopen Arc Cache"))return;
+        if(!await Confirm(title,what+"\n\nChanging this needs administrator rights. Arc Cache will close and open again as administrator; Windows asks for your approval. Then choose this option again.","Reopen as administrator"))return;
+        try{Process.Start(new ProcessStartInfo(Environment.ProcessPath!){UseShellExecute=true,Verb="runas",Arguments="--open-graphics"});}
+        catch(System.ComponentModel.Win32Exception){Log("Reopening as administrator was cancelled. Nothing was changed.");return;}
+        Close();
+    }
+    void RenderWindowsSetting(){
+        bool on=graphicsWindowsState==GraphicsWindowsState.On,restart=graphicsWindowsState==GraphicsWindowsState.RestartRequired,known=graphicsWindowsState is GraphicsWindowsState.On or GraphicsWindowsState.Off or GraphicsWindowsState.RestartRequired;
+        string? blocked=on?TurnOffBlockedReason():null;
+        string adminNote=isAdministrator?"":" Turning it off also needs administrator rights; Arc Cache asks Windows for them when you click it.";
+        string hint=blocked!=null?blocked+adminNote:isAdministrator?"Restart Windows after turning it off.":"Needs administrator rights: Arc Cache reopens as administrator after Windows asks for your approval. Restart Windows afterward.";
+        DisableRouteButton.Visibility=on&&!developerStatePreview?Visibility.Visible:Visibility.Collapsed;DisableRouteButton.IsEnabled=!busy&&blocked==null;
+        DisableRouteReason.Text=hint;DisableRouteReason.Visibility=DisableRouteButton.Visibility;
+        WindowsChangeLink.Content=windowsManageOpen?"Close":"Change";
+        SettingsWindowsStatus.Text=!known?"Checking the Windows setting…":restart?"On · restart Windows to finish":on?"On":routingTurnOffRestart?"Off · restart Windows to finish":"Off";
+        SettingsEnableRoute.Visibility=graphicsWindowsState==GraphicsWindowsState.Off&&!routingTurnOffRestart?Visibility.Visible:Visibility.Collapsed;SettingsEnableRoute.IsEnabled=!busy;
+        SettingsDisableRoute.Visibility=on?Visibility.Visible:Visibility.Collapsed;SettingsDisableRoute.IsEnabled=!busy&&blocked==null;
+        SettingsWindowsReason.Text=on?hint:graphicsWindowsState==GraphicsWindowsState.Off&&!routingTurnOffRestart&&!isAdministrator?"Needs administrator rights: Arc Cache reopens as administrator after Windows asks for your approval. Restart Windows afterward.":"";
+        SettingsWindowsReason.Visibility=SettingsWindowsReason.Text.Length>0?Visibility.Visible:Visibility.Collapsed;
     }
     async void ChooseScsCli(object sender,RoutedEventArgs e) {
         var picker=new FileOpenPicker();picker.FileTypeFilter.Add(".exe");WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));var file=await picker.PickSingleFileAsync();if(file==null)return;

@@ -129,6 +129,7 @@ public sealed record GraphicsPageState(
             GraphicsWindowsState.RestartRequired => "Save your work, restart Windows, then return here to check again.",
             GraphicsWindowsState.Error => "Restart Windows, then return here and try again.",
             GraphicsWindowsState.Unknown when step1Complete => "Arc Cache is checking the Windows setting.",
+            GraphicsWindowsState.On when step1Complete => "Windows lets each set-up game load the driver copy in its own folder.",
             _ => ""
         };
 

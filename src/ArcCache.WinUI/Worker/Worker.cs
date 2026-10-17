@@ -207,16 +207,24 @@ class Worker {
         if(!String.IsNullOrWhiteSpace(trialFile)&&File.Exists(trialFile)){driverInspection=DriverTrial.Inspect(trialFile);trialCapabilities=PerSizeCapabilities(trialFile,out successful,driverInspection);}else{successful=null;trialCapabilities=PerSizeCapabilities(null,out successful);}
         limitCapabilities=trialCapabilities;
         if(qualified&&String.Equals(activeDriver,"igd12um64xe2.dll",StringComparison.OrdinalIgnoreCase)){var reviewed=DriverCatalog.LimitCapabilities(true,null);var chunked=limitCapabilities.First(c=>c.MiB==4096);var four=reviewed.First(c=>c.MiB==4096);four.Buildable=chunked.Buildable;four.Available=chunked.Available;four.Tested=chunked.Tested;four.Evidence=chunked.Evidence;limitCapabilities=reviewed;}
-        string testedDriver=null;if(successful!=null){var proof=DriverTrial.Saved(successful);testedDriver=proof.ContainsKey("LoadedCacheDriver")?(string)proof["LoadedCacheDriver"]:(string)proof["Driver"];}return new {SuccessfulTrial=successful,SuccessfulTrialDriver=testedDriver,CapabilityDriver=activeDriver,TrialInspection=driverInspection,TrialCapabilities=trialCapabilities,LimitCapabilities=limitCapabilities,DriverFolder=folder,Version=package.Version,Adapter=package.Adapter,AdapterId=package.Id,Adapters=DriverCatalog.Packages(),Hash=xe2.Hash,Original=xe2.State=="QualifiedOriginal",Compatible=qualified,CompatibilityReason=reason,Files=files,IdentityTag=currentIdentity,DeveloperOverride=routing.DeveloperOverride,RebootRequired=routing.RebootRequired,Administrator=IsolationControl.Administrator,SmartAppControl=SmartAppControlState()};
+        string testedDriver=null;if(successful!=null){var proof=DriverTrial.Saved(successful);testedDriver=proof.ContainsKey("LoadedCacheDriver")?(string)proof["LoadedCacheDriver"]:(string)proof["Driver"];}return new {SuccessfulTrial=successful,SuccessfulTrialDriver=testedDriver,CapabilityDriver=activeDriver,TrialInspection=driverInspection,TrialCapabilities=trialCapabilities,LimitCapabilities=limitCapabilities,DriverFolder=folder,Version=package.Version,Adapter=package.Adapter,AdapterId=package.Id,Adapters=DriverCatalog.Packages(),Hash=xe2.Hash,Original=xe2.State=="QualifiedOriginal",Compatible=qualified,CompatibilityReason=reason,Files=files,IdentityTag=currentIdentity,DeveloperOverride=routing.DeveloperOverride,RebootRequired=routing.RebootRequired,TurnOffRestartRequired=routing.TurnOffRestartRequired,TurnOffAvailable=routing.TurnOffAvailable,GamesUsingCopies=GamesUsingCopies(),Administrator=IsolationControl.Administrator,SmartAppControl=SmartAppControlState()};
     }
-    sealed class RoutingReview { public bool DeveloperOverride,RebootRequired; }
+    sealed class RoutingReview { public bool DeveloperOverride,RebootRequired,TurnOffRestartRequired,TurnOffAvailable; }
     // Smart App Control (Windows 11): 0 off, 1 on, 2 evaluation; -1 unknown. When on, Windows may refuse the changed and
     // therefore no longer validly signed Intel DLL in a game's driver copy (not tested yet).
     static int SmartAppControlState(){try{using(var key=Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\CI\Policy")){object value=key==null?null:key.GetValue("VerifiedAndReputablePolicyState",null);return (value is int)?(int)value:-1;}}catch(Exception){return -1;}}
+    static string GamesRoot(){return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"IntelArcCacheCap","games");}
+    static object AutoCleanup(string probe){try{return DriverTrial.CleanupOldTests(probe,GamesRoot());}catch(Exception e){return new{RemovedFolders=new string[0],BytesFreed=0L,SkippedUnsafe=0,Errors=new[]{e.Message}};}}
+    // Games whose driver copy folder still exists. Unreadable records count too: turning the Windows setting off is refused for them.
+    static string[] GamesUsingCopies(){string root=GamesRoot();var games=new List<string>();if(!Directory.Exists(root))return games.ToArray();foreach(string file in Directory.GetFiles(root,"*.json")){try{var receipt=MatchedSet.Read(file);if(Directory.Exists(receipt.Folder))games.Add(receipt.Executable??file);}catch(Exception){games.Add(file);}}return games.ToArray();}
     static RoutingReview ReadRouting(){
         object setting;using(var key=Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options"))setting=key==null?null:key.GetValue("DevOverrideEnable",null);
-        bool reboot=false;if(File.Exists(IsolationControl.ReceiptPath)){var receipt=Json.Deserialize<OverrideReceipt>(File.ReadAllText(IsolationControl.ReceiptPath));DateTime created;if(receipt!=null&&receipt.Status=="enabled-reboot-required"&&DateTime.TryParse(receipt.CreatedUtc,null,System.Globalization.DateTimeStyles.RoundtripKind,out created))reboot=created.ToUniversalTime()>DateTime.UtcNow.AddMilliseconds(-(double)GetTickCount64());}
-        return new RoutingReview{DeveloperOverride=setting!=null&&Convert.ToInt32(setting)==1,RebootRequired=reboot};
+        bool reboot=false,offReboot=false,turnOff=false;if(File.Exists(IsolationControl.ReceiptPath)){var receipt=Json.Deserialize<OverrideReceipt>(File.ReadAllText(IsolationControl.ReceiptPath));DateTime created,restored;DateTime boot=DateTime.UtcNow.AddMilliseconds(-(double)GetTickCount64());
+            // Turning off restores the value saved before Arc Cache turned the setting on; when that value was already 1 there is nothing to turn off.
+            if(receipt!=null&&(receipt.Status=="enabled-reboot-required"||receipt.Status=="enable-started"||receipt.Status=="restore-started")&&(!receipt.WasPresent||receipt.Before==0))turnOff=true;
+            if(receipt!=null&&receipt.Status=="restored-reboot-required"&&DateTime.TryParse(receipt.RestoredUtc,null,System.Globalization.DateTimeStyles.RoundtripKind,out restored))offReboot=restored.ToUniversalTime()>boot;
+            if(receipt!=null&&receipt.Status=="enabled-reboot-required"&&DateTime.TryParse(receipt.CreatedUtc,null,System.Globalization.DateTimeStyles.RoundtripKind,out created))reboot=created.ToUniversalTime()>DateTime.UtcNow.AddMilliseconds(-(double)GetTickCount64());}
+        return new RoutingReview{DeveloperOverride=setting!=null&&Convert.ToInt32(setting)==1,RebootRequired=reboot,TurnOffRestartRequired=offReboot,TurnOffAvailable=turnOff};
     }
     static string Repaired(string repair,string message){return String.IsNullOrEmpty(repair)?message:repair+"\r\n"+message;}
     static void Progress(int percent,string text){Console.Error.WriteLine("ARCCACHE_PROGRESS "+Json.Serialize(new{Percent=Math.Max(0,Math.Min(100,percent)),Message=text}));}
@@ -238,8 +246,11 @@ class Worker {
         var patched=(Dictionary<string,object>)DriverTrial.Create(actualFile,requested,probe);
         DriverTrial.Progress=delegate(int value,string text){Progress(70+value*29/100,"Selected size: "+text);};
         patched=(Dictionary<string,object>)DriverTrial.Run((string)patched["Receipt"],probe);bool passed=Convert.ToBoolean(patched["RuntimeVerified"]);
+        // Each test folder holds a full 1.3 GB driver copy. After a passing test, only the newest passing
+        // test per cache size and the tests used by set-up games are needed; older ones are removed here.
+        object cleanup=null;if(passed){Progress(99,"Removing older driver tests");cleanup=AutoCleanup(probe);}
         Progress(100,"Result saved. Game support and actual cache capacity are not verified.");
-        return new{Passed=passed,MiB=requested,Control=control,Patched=patched,Summary=passed?"The unchanged control and selected size loaded and prepared one simple shader. Cache capacity, stability and game support are not verified; no game was changed.":"The unchanged control passed, but the selected size did not. Keep normal game settings. No game or Windows driver file was changed."};
+        return new{Passed=passed,MiB=requested,Control=control,Patched=patched,Cleanup=cleanup,Summary=passed?"The unchanged control and selected size loaded and prepared one simple shader. Cache capacity, stability and game support are not verified; no game was changed.":"The unchanged control passed, but the selected size did not. Keep normal game settings. No game or Windows driver file was changed."};
     }
     [STAThread]static int Main(string[] args) {
         try {

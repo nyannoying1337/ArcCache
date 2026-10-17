@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/nyannoying1337/ArcCache/releases/latest"><img src="https://img.shields.io/badge/download-Windows_x64-36bff5?style=flat-square" alt="Windows x64 download" /></a>
-  <img src="https://img.shields.io/badge/release-2026.10.17-36bff5?style=flat-square" alt="Release 2026.10.17" />
+  <img src="https://img.shields.io/badge/release-2026.10.18-36bff5?style=flat-square" alt="Release 2026.10.18" />
   <img src="https://img.shields.io/badge/interface-WinUI_3-627d98?style=flat-square" alt="WinUI 3" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-7596b3?style=flat-square" alt="GPL-3.0-or-later" /></a>
 </p>
@@ -29,6 +29,12 @@
 Games compile shaders while you play, which causes stutter. The graphics driver keeps compiled shaders in a cache so this happens only once. On Intel Arc, the D3D12 driver allows **512 MB per game**. A modern game needs more than that, so the driver throws old shaders away and the game has to compile them again: in the next session, in the next area, after every restart. ([Intel on shader compilation stutter](https://www.intel.com/content/www/us/en/support/articles/000102440/graphics.html))
 
 Arc Cache raises that limit **for the games you choose**. Together with [SCSKiller](docs/SCSKILLER.md), which compiles a game's shaders before you play, the whole shader set can stay on disk.
+
+## What's new in 2026.10.18
+
+- **Old driver tests no longer pile up.** Each test keeps a full 1.3 GB driver copy. After every passing test, Arc Cache now deletes older ones and keeps only the newest test per cache size and the tests your games use. Settings shows the real size and folder. Old tests from earlier app versions can be removed too (on the developer's PC: 56.7 GB down to 9.2 GB, games stayed set up).
+- **Game-specific settings can be turned off again.** Graphics → Change and the new Settings card show the status, a turn-on/turn-off button, and which games still need their driver copy before it can go off. When administrator rights are needed, Arc Cache says so and reopens itself as administrator after Windows asks for approval.
+- **A clearer introduction.** Three screens: what Arc Cache does, what the Windows setting (`DevOverrideEnable`) does and doesn't do, and the setup steps.
 
 ## What's new in 2026.10.17
 
@@ -55,8 +61,8 @@ Arc Cache raises that limit **for the games you choose**. Together with [SCSKill
 
 Get the latest release on the [**Releases page**](https://github.com/nyannoying1337/ArcCache/releases/latest):
 
-- **`ArcCache-Setup-2026.10.17-Windows-x64.exe`**: the installer, recommended. It installs for your Windows account only (no admin rights needed), adds a Start menu entry and updates an older Arc Cache in place.
-- **`ArcCache-2026.10.17-Windows-x64.zip`**: the portable version. Extract the **whole** ZIP and run `ArcCache.exe`.
+- **`ArcCache-Setup-2026.10.18-Windows-x64.exe`**: the installer, recommended. It installs for your Windows account only (no admin rights needed), adds a Start menu entry and updates an older Arc Cache in place.
+- **`ArcCache-2026.10.18-Windows-x64.zip`**: the portable version. Extract the **whole** ZIP and run `ArcCache.exe`.
 
 Each file has a `.sha256` next to it. Both are unsigned, so Windows SmartScreen may ask once. Arc Cache is self-contained, so you don't need .NET or anything else. It needs Windows 10 19041 or newer (tested on Windows 11) and an Intel Arc or Intel Xe graphics driver. A matching SCSKiller build is included in the `SCSKiller` folder.
 
