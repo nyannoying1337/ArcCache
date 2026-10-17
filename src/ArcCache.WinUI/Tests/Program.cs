@@ -65,6 +65,8 @@ foreach(var row in MyGamesPageStates.StateTable)Test("My games state table: "+ro
  if(row.Key=="dx12-unavailable")Check(state.ListBadge=="No DirectX 12"&&state.AccentAction==MyGamesAction.None,"A game without DirectX 12 must explain the limit without a dead-end action.");
  if(row.Key=="game-uninstalled")Check(state.ListBadge=="Not installed","Uninstalled games need a specific list badge.");
  if(row.Key=="blocked-by-another-mod")Check(state.HeaderStatus=="Blocked by another mod"&&state.ListBadge=="Blocked"&&!state.ShowGameFlow&&state.AccentAction==MyGamesAction.OpenGameFolder&&state.AccentButton=="Open game folder"&&state.Warning!.Contains("OptiScaler")&&state.Warning.Contains(row.Input.ModBlocker!.Path)&&state.Warning.Contains("combining both can crash")&&state.Warning.Contains("Remove or disable the mod, then check again"),"A local DirectX proxy must have a clear blocked state, identity, path and recovery action.");
+ if(row.Key=="anticheat-running")Check(!state.ShowGameFlow&&state.AccentAction==MyGamesAction.None&&state.ListBadge=="Anti-cheat"&&state.Warning!.Contains("Easy Anti-Cheat")&&state.Warning.Contains("single-player")&&state.Warning.Contains("anti-cheat disabled"),"A game seen with a running anti-cheat must not offer setup and must say how to clear it.");
+ if(row.Key=="anticheat-with-copy")Check(!state.ShowGameFlow&&state.AccentButton=="Use default settings"&&state.Warning!.Contains("BattlEye"),"An anti-cheat next to a driver copy must lead to default settings.");
  if(row.Key=="setup-needs-attention")Check(state.HeaderStatus=="Setup needs attention"&&state.ListBadge=="Needs attention"&&!state.ShowGameFlow&&!state.ShowSizeChoices&&!state.ShowSizeApply&&state.AccentAction==MyGamesAction.RestoreGame&&state.AccentButton=="Use default settings"&&state.Warning!.Contains("doesn't match the current game files")&&!state.Warning.Contains(row.Input.DiscoveryMessage!),"A saved setup whose game profile no longer matches must explain the safe next step without presenting the raw DX12 discovery instruction as current advice.");
  if(row.Key=="size-verified-after-close"){
   var effective=MyGamesPageStates.EffectiveLoadResult(MyGamesLoadResult.Unknown,true,16384,"size-loading-verified");
@@ -208,6 +210,18 @@ Test("Steam artwork resolves flat, direct app-ID and hashed folder assets with i
         Check(SteamArtwork.Find(root,999).Portraits.Count==0,"Missing artwork guessed.");
         var game=new SteamGame(3,"Fixture",root,hashed.Portraits[0],ArtworkFallbacks:hashed.Portraits.Skip(1).ToArray());Check(game.IconSources.SequenceEqual(game.ArtworkSources)&&game.ArtworkSources.Count==2,"Icon has no portrait fallback.");
     }finally{Directory.Delete(root,true);}
+});
+Test("Game list anti-cheat hints: always-on beats optional, nothing found, missing folder",()=>{
+    string root=Path.Combine(Path.GetTempPath(),"ArcAntiCheatHints-"+Guid.NewGuid().ToString("N"));
+    try{
+        string clean=Path.Combine(root,"clean","bin");Directory.CreateDirectory(clean);File.WriteAllText(Path.Combine(clean,"game.exe"),"");
+        string eac=Path.Combine(root,"mcc","easyanticheat");Directory.CreateDirectory(eac);File.WriteAllText(Path.Combine(root,"mcc","mcclauncher.exe"),"");
+        string both=Path.Combine(root,"both","a","b");Directory.CreateDirectory(both);Directory.CreateDirectory(Path.Combine(root,"both","BattlEye"));File.WriteAllText(Path.Combine(both,"vgk.sys"),"");
+        var none=AntiCheatHints.Scan(Path.Combine(root,"clean"));Check(none.Level==AntiCheatLevel.NoneFound&&none.Badge=="","Clean folder should show no badge.");
+        var optional=AntiCheatHints.Scan(Path.Combine(root,"mcc"));Check(optional.Level==AntiCheatLevel.Optional&&optional.Name=="Easy Anti-Cheat"&&optional.Badge=="Anti-cheat (EAC)","Easy Anti-Cheat folder (case-insensitive) should be optional.");
+        var always=AntiCheatHints.Scan(Path.Combine(root,"both"));Check(always.Level==AntiCheatLevel.AlwaysOn&&always.Name=="Riot Vanguard","Always-on marker deeper in the folder must win over an optional one.");
+        Check(AntiCheatHints.Scan(Path.Combine(root,"missing")).Level==AntiCheatLevel.NotChecked,"Missing folder is not checked.");
+    }finally{if(Directory.Exists(root))Directory.Delete(root,true);}
 });
 Test("Safety warnings stay brief while retaining multiplayer, anti-cheat and unknown risk",()=>{
     JsonElement Assessment(bool allowed,string? marker,string reason,string multi)=>JsonSerializer.SerializeToElement(new{Allowed=allowed,Marker=marker,Message=reason,Multiplayer=multi});

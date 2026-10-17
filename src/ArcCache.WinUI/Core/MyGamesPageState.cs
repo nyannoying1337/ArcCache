@@ -31,7 +31,8 @@ public sealed record MyGamesPageInputs(
     bool SizeVerified = false,
     LocalModBlocker? ModBlocker = null,
     bool RequiresTrialProfile = false,
-    bool TrialProfileFound = true);
+    bool TrialProfileFound = true,
+    AntiCheatSighting? AntiCheatSeen = null);
 
 public sealed record MyGamesPageState(
     string Key, string HeaderStatus, string ListBadge, bool ShowGameFlow, bool ShowEmptyLibrary,
@@ -84,6 +85,13 @@ public static class MyGamesPageStates {
             return Make(i,"game-uninstalled","Game not found","Not installed",false,false,false,false,"","",false,"","",false,"","",false,0,false,false,false,false,false,false,"",MyGamesAction.ReviewSavedSetup,"The game is no longer installed. Its saved setup can still be reviewed or removed.");
         if (i.ModBlocker is { } blocker)
             return Make(i,"blocked-by-another-mod","Blocked by another mod","Blocked",false,false,false,false,"","",false,"","",false,"","",false,0,false,false,false,false,false,false,"",MyGamesAction.OpenGameFolder,$"Found {blocker.DisplayName}. A mod such as OptiScaler or ReShade also hooks into DirectX, and combining both can crash the game.\nFile: {blocker.Path}\nRemove or disable the mod, then check again.");
+        // An anti-cheat that runs next to the game sees the changed driver file, whatever mode the game is in.
+        if (i.AntiCheatSeen is { } seen)
+            return i.SetupExists
+                ? Make(i,"anticheat-with-copy","Anti-cheat ran with the driver copy","Anti-cheat",false,false,false,false,"","",false,"","",false,"","",false,0,false,false,false,false,false,false,"",MyGamesAction.RestoreGame,
+                    $"{seen.Name} was running while this game ran with its driver copy ({seen.When}). The anti-cheat can see the changed Intel driver file and may block the game or flag your account. Choose Use default settings. Set it up again only if the game can start without {seen.Name}.")
+                : Make(i,"anticheat-running","Anti-cheat runs with this game","Anti-cheat",false,false,false,false,"","",false,"","",false,"","",false,0,false,false,false,false,false,false,"",MyGamesAction.None,
+                    $"{seen.Name} was running while this game ran ({seen.When}). It would see the changed driver file, even in single-player, and could block the game or flag your account, so Arc Cache doesn't set this game up.\nIf the game can start without it (like Halo MCC's \"anti-cheat disabled\" mode), start it that way and leave it running for 30 seconds; Arc Cache checks automatically. If another game with anti-cheat was open at the same time, close that one first.");
         if (i.SetupExists && !i.ProfileFound)
             return Make(i,"setup-needs-attention","Setup needs attention","Needs attention",false,false,false,false,"","",false,"","",false,"","",false,0,false,false,false,false,false,false,"",MyGamesAction.RestoreGame,
                 "This game's saved driver copy doesn't match the current game files (for example after a game update). Use default settings first, then start the game once so Arc Cache can find it again.");
@@ -158,6 +166,8 @@ public static class MyGamesPageStates {
         ("profile-not-found","game profile not found",new(ProfileFound:false),MyGamesAction.LaunchForDiscovery),
         ("trial-profile-not-found","game not observed with the tested driver copy",new(RequiresTrialProfile:true,TrialProfileFound:false,ProfileFound:true),MyGamesAction.LaunchForDiscovery),
         ("blocked-by-another-mod","blocked by local d3d12.dll",new(ModBlocker:new LocalModBlocker(@"D:\SteamLibrary\steamapps\common\Palworld\Pal\Binaries\Win64\d3d12.dll",ProductName:"OptiScaler",FileDescription:"OptiScaler DirectX proxy",CompanyName:"OptiScaler")),MyGamesAction.OpenGameFolder),
+        ("anticheat-running","anti-cheat seen running before setup",new(AntiCheatSeen:new("Easy Anti-Cheat",new DateTime(2026,10,17,9,50,0,DateTimeKind.Utc),false)),MyGamesAction.None),
+        ("anticheat-with-copy","anti-cheat seen running with the driver copy",new(SetupExists:true,ControlVerified:true,AntiCheatSeen:new("BattlEye",new DateTime(2026,10,17,9,50,0,DateTimeKind.Utc),true)),MyGamesAction.RestoreGame),
         ("dx12-unavailable","DirectX 12 unavailable",new(Dx12Unavailable:true),MyGamesAction.None),
         ("not-set-up","not set up",new(),MyGamesAction.SetUp),
         ("setup-running","setup running",new(SetupRunning:true),MyGamesAction.None),

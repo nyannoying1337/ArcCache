@@ -10,6 +10,11 @@ public sealed record SteamGame(uint AppId, string Name, string InstallDirectory,
     public string SupportLabel => Source;
     public string? SetupBadge { get; init; }
     public bool HasSetupBadge => !string.IsNullOrWhiteSpace(SetupBadge);
+    public AntiCheatHint AntiCheat { get; init; } = AntiCheatHint.NotChecked;
+    public bool HasAlwaysOnAntiCheat => AntiCheat.AlwaysOn;
+    public bool HasOptionalAntiCheat => AntiCheat.Optional;
+    public string AntiCheatBadge => AntiCheat.Badge;
+    public string AntiCheatTooltip => AntiCheat.Explanation;
     public IReadOnlyList<string> ArtworkSources => (Artwork is null?Array.Empty<string>():new[]{Artwork}).Concat(ArtworkFallbacks??Array.Empty<string>()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     public IReadOnlyList<string> IconSources => (Icon is null?Array.Empty<string>():new[]{Icon}).Concat(ArtworkSources).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 }

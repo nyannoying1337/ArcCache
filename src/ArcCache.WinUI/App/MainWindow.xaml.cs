@@ -30,7 +30,8 @@ public partial class MainWindow : Window {
     int introductionIndex;
     bool introductionVisible;
     bool busy,driverOriginal,routingReady,receiptValid,recordValid;
-    bool isAdministrator,routingTurnOffAvailable,routingTurnOffRestart,windowsManageOpen;string[] gamesUsingCopies=[];long driverTestsBytes=-1;
+    bool isAdministrator,routingTurnOffAvailable,routingTurnOffRestart,windowsManageOpen;string[] gamesUsingCopies=[];long driverTestsBytes=-1;readonly bool vanguardInstalled=AntiCheatHints.VanguardInstalled();
+    const string VanguardNote="Riot Vanguard is installed on this PC. While game-specific settings are on, VALORANT, League of Legends and 2XKO refuse to start (\"Something unusual happened\"). Turn the setting off before playing them.";
     string? steamRoot;
     Process? cacheMonitor;
     bool safetyAllowed;
@@ -109,7 +110,7 @@ public partial class MainWindow : Window {
         Activated+=async (_,e)=>{if(e.WindowActivationState!=WindowActivationState.Deactivated)await CheckDriverChanged();};
         discoveryTimer.Tick+=async (_,_)=>await PollGame();
         try{scs=new ScsKillerBridge(Path.Combine(store.Root,"scskiller-bridge.json")).Load();string bundled=Path.Combine(AppContext.BaseDirectory,"SCSKiller","cli","scskiller.exe");if(scs.CliPath==null&&File.Exists(bundled))scs.SelectCli(bundled);ScsPath.Text=scs.CliPath??"Choose the SCSKiller command-line program (scskiller.exe).";}catch(Exception e){Log("SCSKiller configuration could not be read: "+e.Message);scs=new ScsKillerBridge(Path.Combine(store.Root,"scskiller-bridge.json"));}
-        cacheFiles=new CacheFileMap(Path.Combine(store.Root,"cache-files.json"));ShowScsOptions();DispatcherQueue.TryEnqueue(async()=>await RefreshScsInfo());
+        cacheFiles=new CacheFileMap(Path.Combine(store.Root,"cache-files.json"));sightings=new AntiCheatSightings(Path.Combine(store.Root,"anticheat-sightings.json"));ShowScsOptions();DispatcherQueue.TryEnqueue(async()=>await RefreshScsInfo());
     }
 #if DEBUG
     void LoadDeveloperStatePreview(GraphicsPageInputs input,string requestedKey){
@@ -170,7 +171,7 @@ public partial class MainWindow : Window {
         selected=input.HasSelection?fake:null;myGamesPreviewInput=input;gameLoadResult=input.LoadResult;selectedCacheMiB=int.TryParse(input.CacheSize.Replace(" GB","",StringComparison.OrdinalIgnoreCase),out int parsed)?parsed*1024:512;
         if(requestedKey is "setup-running" or "size-apply-running")setupOperationRunning=true;else setupOperationRunning=false;
         if(selected is not null)desiredLimits[selected.Key]=input.ChosenDefault?512:selectedCacheMiB;
-        GameStatusFilter.ItemsSource=new[]{"All games","Set up","Needs attention"};GameStatusFilter.SelectedIndex=0;
+        GameStatusFilter.ItemsSource=StatusFilters;GameStatusFilter.SelectedIndex=0;
         SourceFilter.ItemsSource=new[]{"All libraries","Epic","Steam"};SourceFilter.SelectedItem="All libraries";
         Search.Text="";Nav.IsEnabled=true;Nav.SelectedItem=LibraryNav;activePageTag=null;NavigateTo("Library");
         GameTitle.Text=selected?.Name??"Choose a game";GameSource.Text=selected?.Source.ToUpperInvariant()+" LIBRARY"??"GAME LIBRARY";
@@ -192,6 +193,7 @@ public partial class MainWindow : Window {
                 if(simulateDriverUpdate){ShowDriverChange(driverIdentity+"-preview-fixture");File.WriteAllText(path+".driver-checks.json",JsonSerializer.Serialize(new{ApplyEnabled=ApplyButton.IsEnabled,ApplyLabel=ApplyButton.Content?.ToString(),LaunchEnabled=LaunchButton.IsEnabled,RecoveryEnabled=RestoreButton.IsEnabled,NoticeVisible=DriverUpdateNotice.IsOpen}));}
                 if(Environment.GetCommandLineArgs().Contains("--preview-trial")){NavigateTo("Driver");await CheckTrialSupport();await Task.Delay(300);Root.UpdateLayout();File.WriteAllText(path+".trial-checks.json",JsonSerializer.Serialize(new{Eligible=trialEligible,State=graphicsPageState,Summary=TrialSummary.Text,Progress=TrialProgress.Value,ReadOnly=preview}));}
                 if(Environment.GetCommandLineArgs().Contains("--preview-settings")){NavigateTo("Settings");Root.UpdateLayout();}
+                if(Environment.GetCommandLineArgs().Contains("--preview-library")){await ScanAntiCheat();Nav.SelectedItem=LibraryNav;NavigateTo("Library");Root.UpdateLayout();}
                 if(Environment.GetCommandLineArgs().Contains("--preview-welcome")){ShowIntroduction();if(Environment.GetCommandLineArgs().Contains("--preview-last")){introductionIndex=Introduction.Screens.Length-1;RenderIntroduction();}}
                 File.WriteAllText(path+".libraries.json",JsonSerializer.Serialize(new{Count=games.Count,Sources=games.GroupBy(g=>g.Source).ToDictionary(g=>g.Key,g=>g.Count()),UniqueKeys=games.Select(g=>g.Key).Distinct().Count()==games.Count,ReadOnly=preview}));
                 int runsBefore=foregroundRuns,pollsBefore=backgroundPolls;
@@ -271,11 +273,42 @@ public partial class MainWindow : Window {
         LibraryCount.Text=$"{games.Count} installed games · local discovery";
         LibraryNotice.IsOpen=result.Warnings.Count>0;LibraryNotice.Title="Library discovery";LibraryNotice.Message=string.Join(Environment.NewLine,result.Warnings.Take(3));
         var source=SourceFilter.SelectedItem as string??"All libraries";SourceFilter.ItemsSource=new[]{"All libraries"}.Concat(games.Select(g=>g.Source).Distinct().OrderBy(x=>x)).ToArray();SourceFilter.SelectedItem=SourceFilter.Items.Contains(source)?source:"All libraries";
-        if(GameStatusFilter.Items.Count==0){GameStatusFilter.ItemsSource=new[]{"All games","Set up","Needs attention"};GameStatusFilter.SelectedIndex=0;}
-        Filter();await LoadDriver();
+        if(GameStatusFilter.Items.Count==0){GameStatusFilter.ItemsSource=StatusFilters;GameStatusFilter.SelectedIndex=0;}
+        Filter();_=ScanAntiCheat();await LoadDriver();
         var visible=GamesList.Items.OfType<SteamGame>().ToArray();SteamGame? next=previousId is null?visible.FirstOrDefault(g=>g.AppId==292030)??visible.FirstOrDefault():visible.FirstOrDefault(g=>g.Key==previousId);
         if(previousId is not null&&next is null&&previousGames.TryGetValue(previousId,out var missing))next=missing;
         GamesList.SelectedItem=visible.FirstOrDefault(g=>g.Key==next?.Key);selected=next;await ShowGame();RefreshHome();
+    }
+    static readonly string[] StatusFilters=["All games","Set up","Needs attention","No anti-cheat found","Anti-cheat"];
+    readonly Dictionary<string,AntiCheatHint> antiCheatHints=new();
+    AntiCheatSightings? sightings;string? acSessionKey;DateTime acSessionStart,lastAcSample;bool acSessionSeen;
+    static readonly TimeSpan CleanRunNeeded=TimeSpan.FromSeconds(30);
+    // Watches the selected game while it runs: an anti-cheat process next to it blocks setup (or, with a driver copy,
+    // asks for default settings); 30 seconds without one clear an earlier sighting, e.g. Halo MCC without anti-cheat.
+    async Task SampleAntiCheat(SteamGame game){
+        if(preview||sightings is null||DateTime.UtcNow-lastAcSample<TimeSpan.FromSeconds(4))return;lastAcSample=DateTime.UtcNow;
+        var (running,name)=await Task.Run(()=>(AntiCheatRuntime.AnyProcessUnder(game.InstallDirectory),AntiCheatRuntime.RunningName()));
+        if(!running){if(acSessionKey==game.Key)acSessionKey=null;return;}
+        var now=DateTime.UtcNow;if(acSessionKey!=game.Key){acSessionKey=game.Key;acSessionStart=now;acSessionSeen=false;}
+        if(name is not null){
+            if(acSessionSeen)return;acSessionSeen=true;
+            bool withCopy=selected?.Key==game.Key&&selectedReceipt is not null&&selectedReceipt.Status!="removed";
+            sightings.Record(game.Key,new AntiCheatSighting(name,now,withCopy));
+            Log(withCopy?$"{name} is running while {game.Name} uses its driver copy. Close the game and choose Use default settings.":$"{name} is running with {game.Name}. Arc Cache won't set this game up while an anti-cheat runs.");
+            if(withCopy){GlobalNotice.Severity=InfoBarSeverity.Error;GlobalNotice.Title=$"{name} is running with {game.Name}'s driver copy";GlobalNotice.Message="The anti-cheat can see the changed Intel driver file. Close the game and choose Use default settings for it.";GlobalNotice.IsOpen=true;}
+            Filter();RenderMyGames();
+        }else if(!acSessionSeen&&now-acSessionStart>=CleanRunNeeded&&sightings.Get(game.Key) is { } old&&!old.WithDriverCopy){
+            sightings.Clear(game.Key);Log($"{game.Name} ran for 30 seconds without {old.Name}. Setup is available again.");Filter();RenderMyGames();
+        }
+    }
+
+    // A quick, bounded look into each game folder so the list can mark anti-cheat games before one is opened.
+    async Task ScanAntiCheat(){
+        if(preview&&developerMyGamesPreview)return;
+        var pending=games.Where(g=>!antiCheatHints.ContainsKey(g.Key)).Select(g=>(g.Key,g.InstallDirectory)).ToArray();if(pending.Length==0)return;
+        var found=await Task.Run(()=>{var results=new System.Collections.Concurrent.ConcurrentDictionary<string,AntiCheatHint>();Parallel.ForEach(pending,new ParallelOptions{MaxDegreeOfParallelism=4},game=>{try{results[game.Key]=AntiCheatHints.Scan(game.InstallDirectory);}catch(Exception){results[game.Key]=AntiCheatHint.NotChecked;}});return results;});
+        foreach(var pair in found)antiCheatHints[pair.Key]=pair.Value;
+        Filter();
     }
     string ListBadge(SteamGame game){
         if(developerMyGamesPreview)return selected?.Key==game.Key?myGamesPageState?.ListBadge??string.Empty:string.Empty;
@@ -290,8 +323,8 @@ public partial class MainWindow : Window {
         synchronizingSelection=true;try{
             string? id=selected?.Key;string query=Search.Text??"";string? source=SourceFilter.SelectedItem as string;string? status=GameStatusFilter.SelectedItem as string;
             var visible=games.Where(g=>g.Name.Contains(query,StringComparison.OrdinalIgnoreCase)&&(source is null||source=="All libraries"||g.Source==source))
-                .Select(g=>g with{SetupBadge=ListBadge(g)})
-                .Where(g=>status is null||status=="All games"||status=="Set up"&&g.HasSetupBadge&&g.SetupBadge!="Needs attention"&&g.SetupBadge!="Blocked"||status=="Needs attention"&&(g.SetupBadge=="Needs attention"||g.SetupBadge=="Blocked")).ToArray();
+                .Select(g=>g with{SetupBadge=ListBadge(g),AntiCheat=sightings?.Get(g.Key) is { } seen?AntiCheatHint.Seen(seen):antiCheatHints.TryGetValue(g.Key,out var hint)?hint:AntiCheatHint.NotChecked})
+                .Where(g=>status is null||status=="All games"||status=="No anti-cheat found"&&g.AntiCheat.Level==AntiCheatLevel.NoneFound||status=="Anti-cheat"&&g.AntiCheat.Level is AntiCheatLevel.AlwaysOn or AntiCheatLevel.Optional||status=="Set up"&&g.HasSetupBadge&&g.SetupBadge!="Needs attention"&&g.SetupBadge!="Blocked"||status=="Needs attention"&&(g.SetupBadge=="Needs attention"||g.SetupBadge=="Blocked")).ToArray();
             GamesList.ItemsSource=visible;if(id!=null)GamesList.SelectedItem=visible.FirstOrDefault(g=>g.Key==id);
             LibraryCount.Text=$"{visible.Length} of {games.Count} games";LibraryEmptyState.Visibility=Visibility.Collapsed;SearchEmptyState.Visibility=games.Count>0&&visible.Length==0?Visibility.Visible:Visibility.Collapsed;GamesList.Visibility=visible.Length==0?Visibility.Collapsed:Visibility.Visible;
         }finally{synchronizingSelection=false;}
@@ -390,6 +423,7 @@ public partial class MainWindow : Window {
         if(busy||backgroundCheck||selected==null||activeModBlocker is not null||LibraryPanel.Visibility!=Visibility.Visible)return;
         var game=selected;string id=game.Key;backgroundCheck=true;backgroundPolls++;
         try {
+            await SampleAntiCheat(game);if(selected?.Key!=id)return;
             if(TrialMode&&!game.TrialProfileReady) {
                 await DiscoverSelected(true);
                 if(selected?.Key==id&&selected.TrialProfileReady&&!busy)await ShowGame();
@@ -500,7 +534,8 @@ public partial class MainWindow : Window {
                 AppliedDefault:selectedReceipt?.MiB is null or <=512,ChosenDefault:chosen<=512,
                 LoadResult:EffectiveLoadResult(),LaunchLabel:LaunchThroughLabel(),CacheSize:CacheLabel(chosen),AvailableSizes:CacheSizesForGame(),AppliedChoiceMatches:selectedReceipt?.MiB==chosen,TrialNeedsRetest:setupState?.TrialNeedsRetest==true,DiscoveryMessage:discoveryMessage,SizeVerified:setupState?.Configured==true&&selectedReceipt?.MiB>512&&selectedReceipt.Status=="size-loading-verified",
                 ModBlocker:selected?.Key==activeModBlockerGameKey?activeModBlocker:null,
-                RequiresTrialProfile:TrialMode,TrialProfileFound:selected?.TrialProfileReady==true);
+                RequiresTrialProfile:TrialMode,TrialProfileFound:selected?.TrialProfileReady==true,
+                AntiCheatSeen:selected is null?null:sightings?.Get(selected.Key));
         }
         var state=MyGamesPageStates.Resolve(input);
         if(myGamesChangeStep==2&&state.Step2Complete)state=state with{HeaderStatus="Set up · launch to check",ListBadge="Set up",Step2Result="Ready to check again",Step2Body="Start the game in DirectX 12. Arc Cache checks its loaded driver.",Step2Complete=false,Step3Result="Waiting for step 2",Step3Body="",Step3Complete=false,ExpandedStep=2,ShowSizeChoices=false,ShowSizeApply=false,ShowStep2Launch=true,ShowStep3Launch=false,AccentButton=input.LaunchLabel,AccentAction=MyGamesAction.Launch,Warning=null};
@@ -634,7 +669,7 @@ public partial class MainWindow : Window {
         if(selectedReceipt?.MiB==512&&selectedReceipt.Status=="original-control-loading-verified")gameLoadResult=MyGamesLoadResult.DriverCopyLoaded;
         if(setupState?.Configured==true&&selectedReceipt?.MiB>512)desiredLimits[game.Key]=selectedReceipt.MiB;
         RenderSetup();
-        if(activeModBlocker is null&&(!preview||previewWatchSeconds>0)&&(!game.Supported||TrialMode&&!game.TrialProfileReady||NeedsControlObservation()||selectedReceipt?.MiB>512))discoveryTimer.Start();RenderMyGames();RefreshHome();
+        if(activeModBlocker is null&&(!preview||previewWatchSeconds>0)&&(!game.Supported||TrialMode&&!game.TrialProfileReady||NeedsControlObservation()||selectedReceipt?.MiB>512||sightings?.Get(game.Key) is not null))discoveryTimer.Start();RenderMyGames();RefreshHome();
     }
     void ArtworkOpened(object sender,RoutedEventArgs e)=>GamePlaceholder.Visibility=Visibility.Collapsed;
     void ArtworkFailed(object sender,ExceptionRoutedEventArgs e)=>GamePlaceholder.Visibility=Visibility.Visible;
@@ -1137,6 +1172,7 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
     async void EnableRouting(object sender,RoutedEventArgs e) {
         if(PreviewOnlyFeedback()||busy)return;
         string what="Windows needs this one-time setting (DevOverrideEnable) so a game can load the separate Intel graphics files Arc Cache puts in a folder next to it, such as Game.exe.local. Without it, Windows ignores that folder and the game keeps using the installed driver. The setting applies to the whole PC; only programs that have such a folder are affected. It does not replace your installed driver or turn off Windows security. Restart Windows afterward. Arc Cache saves the previous value so you can turn it off again in Settings.";
+        if(vanguardInstalled)what+="\n\n"+VanguardNote;
         if(!isAdministrator){await ReopenAsAdministrator("Turn on game-specific settings?",what);return;}
         if(!await Confirm("Turn on game-specific settings?",what,"Turn on"))return;
         await Run("Turning on game-specific settings…",async()=>{await Engine(new("EnableOverride",Confirmed:true));await LoadDriver(true);await InspectTrial();});
@@ -1184,12 +1220,13 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
         string adminNote=isAdministrator?"":" Turning it off also needs administrator rights; Arc Cache asks Windows for them when you click it.";
         string hint=blocked!=null?blocked+adminNote:isAdministrator?"Restart Windows after turning it off.":"Needs administrator rights: Arc Cache reopens as administrator after Windows asks for your approval. Restart Windows afterward.";
         DisableRouteButton.Visibility=on&&!developerStatePreview?Visibility.Visible:Visibility.Collapsed;DisableRouteButton.IsEnabled=!busy&&blocked==null;
-        DisableRouteReason.Text=hint;DisableRouteReason.Visibility=DisableRouteButton.Visibility;
+        DisableRouteReason.Text=vanguardInstalled?hint+" "+VanguardNote:hint;DisableRouteReason.Visibility=DisableRouteButton.Visibility;
         WindowsChangeLink.Content=windowsManageOpen?"Close":"Change";
         SettingsWindowsStatus.Text=!known?"Checking the Windows setting…":restart?"On · restart Windows to finish":on?"On":routingTurnOffRestart?"Off · restart Windows to finish":"Off";
         SettingsEnableRoute.Visibility=graphicsWindowsState==GraphicsWindowsState.Off&&!routingTurnOffRestart?Visibility.Visible:Visibility.Collapsed;SettingsEnableRoute.IsEnabled=!busy;
         SettingsDisableRoute.Visibility=on?Visibility.Visible:Visibility.Collapsed;SettingsDisableRoute.IsEnabled=!busy&&blocked==null;
         SettingsWindowsReason.Text=on?hint:graphicsWindowsState==GraphicsWindowsState.Off&&!routingTurnOffRestart&&!isAdministrator?"Needs administrator rights: Arc Cache reopens as administrator after Windows asks for your approval. Restart Windows afterward.":"";
+        if(vanguardInstalled)SettingsWindowsReason.Text=(SettingsWindowsReason.Text+" "+VanguardNote).Trim();
         SettingsWindowsReason.Visibility=SettingsWindowsReason.Text.Length>0?Visibility.Visible:Visibility.Collapsed;
     }
     async void ChooseScsCli(object sender,RoutedEventArgs e) {

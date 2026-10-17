@@ -24,11 +24,75 @@
   <a href="https://github.com/nyannoying1337/ArcCache/issues"><strong>Report a problem</strong></a>
 </p>
 
+## In short
+
+- **What it does:** a game you pick gets its own copy of Intel's graphics files with a larger shader cache limit (1, 2, 4, 8 or 16 GB). Everything else on your PC keeps the normal driver.
+- **Who it's for:** Intel Arc (Xe2, Xe3 and, with 1 GB, Xe1) owners whose games re-compile shaders and stutter because the 512 MB cache is full.
+- **Who it's not for:** games where an anti-cheat runs while you play, even in single-player. Read [Anti-cheat and online games](#anti-cheat-and-online-games) before you set anything up.
+- **How to undo:** **Use default settings** for one game, **Settings → Reset Arc Cache completely** for everything.
+
 ## Why
 
 Games compile shaders while you play, which causes stutter. The graphics driver keeps compiled shaders in a cache so this happens only once. On Intel Arc, the D3D12 driver allows **512 MB per game**. A modern game needs more than that, so the driver throws old shaders away and the game has to compile them again: in the next session, in the next area, after every restart. ([Intel on shader compilation stutter](https://www.intel.com/content/www/us/en/support/articles/000102440/graphics.html))
 
 Arc Cache raises that limit **for the games you choose**. Together with [SCSKiller](docs/SCSKILLER.md), which compiles a game's shaders before you play, the whole shader set can stay on disk.
+
+## How it works
+
+```
+ C:\Games\Palworld\...\Palworld-Win64-Shipping.exe
+ C:\Games\Palworld\...\Palworld-Win64-Shipping.exe.local\   <- the game's driver copy (about 1.3 GB)
+     igd12um64xe2.dll   <- the only changed file: cache limit 512 MB -> 16 GB
+     ... every other Intel file, unchanged and hash-checked
+
+ Windows: DevOverrideEnable = 1   <- "game-specific settings": Windows honours .exe.local folders
+```
+
+1. **A private copy for one game.** Arc Cache copies the installed Intel driver package into a folder next to the game's exe (`<game>.exe.local`). It changes **one value** in that copy, the per-game cache limit, and records the hash of every file.
+2. **Windows loads that copy only for that game.** Normally Windows ignores such a folder. The Windows setting [`DevOverrideEnable`](https://learn.microsoft.com/windows/win32/dlls/dynamic-link-library-redirection) ("game-specific settings" in the app) tells it to look there first. You turn it on once (administrator rights, one restart). Programs without such a folder keep the normal driver.
+3. **Every size is tested first.** On your PC, Arc Cache runs a small test program with an unchanged copy and then with each size. The test creates real shaders, writes the cache and reloads it. Only sizes that pass can be chosen. After a passing test, older tests are deleted automatically.
+4. **Checks before and after.** Arc Cache shows which driver file the game actually loaded. "Use default settings" removes the copy again, but only the files it created and recorded.
+
+Your installed driver is never modified, and Windows security (driver signature enforcement, Secure Boot) stays on.
+
+## Anti-cheat and online games
+
+**Short version:** use Arc Cache only for games where no anti-cheat runs while you play. Single-player isn't enough if the anti-cheat starts anyway. And expect Riot games to refuse to start while game-specific settings are on.
+
+There are two separate things an anti-cheat can object to:
+
+| | Affects | What can happen | How to fix it |
+| --- | --- | --- | --- |
+| **1. The Windows setting** (`DevOverrideEnable`) | The whole PC, even games Arc Cache never touched | Some anti-cheats refuse to start the game | Turn game-specific settings off in **Settings**, restart Windows |
+| **2. The game's driver copy** | Only the set-up game | The anti-cheat may block the game or **flag the account** | **Use default settings** for that game |
+
+### 1. Why the Windows setting itself is a problem
+
+`DevOverrideEnable` lets *any* program load DLLs from a `<program>.exe.local` folder instead of the real system files. That is exactly what Arc Cache needs, but it is also a way to slip foreign code into a game: Microsoft's documentation notes that redirection works around the loader's normal protection against [DLL planting](https://learn.microsoft.com/windows/win32/dlls/dynamic-link-library-redirection). Some kernel-level anti-cheats therefore check the setting and refuse to start while it is on:
+
+- **Riot Vanguard** (VALORANT, League of Legends, 2XKO): the game stops with *"Failed to Launch: Something unusual happened"*. Riot's own fix is [turning DevOverrideEnable off](https://support-valorant.riotgames.com/hc/en-us/articles/49818408307475-Deactivating-DevOverrideEnable-in-Windows-Registry-Editor). Arc Cache detects an installed Vanguard and warns you before you turn the setting on.
+- **Other anti-cheats:** we don't have a confirmed list yet. If a game starts only while game-specific settings are off, please [report it](https://github.com/nyannoying1337/ArcCache/issues) with the game and the error message.
+
+To play such a game: return every set-up game to default settings, turn game-specific settings off in **Settings**, restart Windows. Turn it back on (and restart) when you want to use Arc Cache again. Your shader caches stay on disk either way.
+
+### 2. Why a driver copy and anti-cheat don't mix
+
+Inside a set-up game, `igd12um64xe2.dll` (or its Xe1/Xe3 sibling) is a **modified Intel DLL**. Its Intel signature is no longer valid. Anti-cheats look at every module loaded into the game process; a changed, unsigned graphics DLL looks just like a cheat that hooks the renderer. The best case is that the game refuses to start; the worst case is an **account ban**.
+
+What Arc Cache does about it:
+
+- **The game list marks anti-cheat games** before you open them:
+  - <kbd>Anti-cheat</kbd> (red): an anti-cheat that runs every time the game starts, such as Riot Vanguard, EA Javelin, Anti-Cheat Expert (ACE), the HoYoverse and NetEase anti-cheats, nProtect GameGuard, XIGNCODE3 or Denuvo Anti-Cheat. Don't set these games up.
+  - <kbd>Anti-cheat (EAC)</kbd>, <kbd>Anti-cheat (BattlEye)</kbd> (amber): Easy Anti-Cheat, BattlEye or PunkBuster files. What counts is whether the anti-cheat **runs** while you play, not whether you play single-player. **Halo: The Master Chief Collection** can start with anti-cheat disabled, so Arc Cache is reasonable there in that mode only. **Le Mans Ultimate** starts Easy Anti-Cheat every time, so it sees the changed driver file even in a practice session: don't set up games like that.
+  - The filter **No anti-cheat found** shows the rest. That isn't a guarantee: the check looks for known file names only.
+- **Arc Cache watches what actually runs.** Files only show that an anti-cheat is installed. While the selected game runs (the first start with the normal driver, and every check after that), Arc Cache looks for a running Easy Anti-Cheat, BattlEye, EA Javelin, ACE or NetEase anti-cheat process. These start with the protected game and stop with it.
+  - Seen **before setup**: the game is marked <kbd>Anti-cheat runs</kbd> and can't be set up. Nothing has been changed yet, so nothing is at risk. If the game can start without the anti-cheat (Halo MCC's "anti-cheat disabled" mode), start it that way and leave it running for 30 seconds: the mark goes away by itself.
+  - Seen **with a driver copy**: Arc Cache shows an error right away and asks you to choose **Use default settings**.
+  - Example from testing: Satisfactory has no anti-cheat files at all, which is why it works. Le Mans Ultimate starts Easy Anti-Cheat through `start_protected_game.exe` every time, so Arc Cache stops at the first start.
+- **Before setup**, a full scan of the game folder runs again. If it finds anti-cheat, multiplayer markers or can't finish, setup needs your explicit confirmation.
+- The scan knows Easy Anti-Cheat, BattlEye, Riot Vanguard, EA Javelin, ACE/Tencent, HoYoverse, NetEase, nProtect GameGuard, XIGNCODE3, NCGuard, HackShield, BlackCipher, Denuvo Anti-Cheat, PunkBuster, EQU8 and Battle.net games. Steam's own "Valve Anti-Cheat" flag is shown as a warning too.
+
+> **When in doubt, don't.** No tool can promise that an anti-cheat accepts a modified driver file. A warning-free scan only means no *known* anti-cheat files were found.
 
 ## What's new in 2026.10.18
 
@@ -36,7 +100,10 @@ Arc Cache raises that limit **for the games you choose**. Together with [SCSKill
 - **Game-specific settings can be turned off again.** Graphics → Change and the new Settings card show the status, a turn-on/turn-off button, and which games still need their driver copy before it can go off. When administrator rights are needed, Arc Cache says so and reopens itself as administrator after Windows asks for approval.
 - **A clearer introduction.** Three screens: what Arc Cache does, what the Windows setting (`DevOverrideEnable`) does and doesn't do, and the setup steps.
 
-## What's new in 2026.10.17
+<details>
+<summary><b>Older versions</b></summary>
+
+### What's new in 2026.10.17
 
 - **No stutter from Arc Cache while you play.** Once the game's driver copy is confirmed, Arc Cache only checks every 15 seconds that the game still runs, with no extra process or driver hashing.
 - **Faster checks.** File hashes use Windows' own fast SHA-256, and unchanged files aren't hashed again just to show a page.
@@ -46,7 +113,7 @@ Arc Cache raises that limit **for the games you choose**. Together with [SCSKill
 - **SCSKiller runs in the background:** the app stays usable during a compile, and closing asks before stopping it.
 - **Uninstall warns** while games still have a driver copy. Long install paths and broken manual library entries no longer cause problems.
 
-## What's new in 2026.10.16
+### What's new in 2026.10.16
 
 - **Works with your current driver.** Sizes are no longer tied to one reviewed driver file. Arc Cache finds the cache code in the installed driver and tests every size on your PC before it offers it. Tested: Arc B580, driver 32.0.101.9150, all sizes up to 16 GB.
 - **Real reload test.** Each size test writes a shader cache and reads it back with the patched driver. It no longer just checks that the driver loads.
@@ -57,6 +124,8 @@ Arc Cache raises that limit **for the games you choose**. Together with [SCSKill
 - **Settings → Reset Arc Cache completely** (everything, with a clear warning) and **Clean up old driver tests** (frees several GB).
 - **More libraries and icons:** HoYoPlay (Genshin, Star Rail, ZZZ) and Kuro (Wuthering Waves) are detected, and games from more launchers show their icons.
 
+</details>
+
 ## Download and install
 
 Get the latest release on the [**Releases page**](https://github.com/nyannoying1337/ArcCache/releases/latest):
@@ -65,13 +134,6 @@ Get the latest release on the [**Releases page**](https://github.com/nyannoying1
 - **`ArcCache-2026.10.18-Windows-x64.zip`**: the portable version. Extract the **whole** ZIP and run `ArcCache.exe`.
 
 Each file has a `.sha256` next to it. Both are unsigned, so Windows SmartScreen may ask once. Arc Cache is self-contained, so you don't need .NET or anything else. It needs Windows 10 19041 or newer (tested on Windows 11) and an Intel Arc or Intel Xe graphics driver. A matching SCSKiller build is included in the `SCSKiller` folder.
-
-## How it works
-
-1. **A private copy for one game.** Arc Cache copies the installed Intel driver package into a folder next to the game's exe (`<game>.exe.local`). It changes **one value** in that copy, the per-game cache limit, and records the hash of every file.
-2. **Windows loads that copy only for that game.** This uses Windows' built-in per-app DLL redirection (`DevOverrideEnable`). You turn it on once (admin rights, one restart). Every other program keeps the normal driver.
-3. **Every size is tested first.** On your PC, Arc Cache runs a small test program with an unchanged copy and then with each size. The test creates real shaders, writes the cache and reloads it. Only sizes that pass can be chosen.
-4. **Checks before and after.** Arc Cache shows which driver file the game actually loaded. "Use default settings" removes the copy again, but only the files it created and recorded.
 
 ## Set up a game
 
@@ -110,13 +172,58 @@ Arc Cache doesn't go by GPU name. It looks at the installed driver file and only
 
 ## Good to know
 
-- **Anti-cheat:** the copy is a **modified, unsigned** Intel DLL inside the game process. Single-player games are fine. Games with anti-cheat (online shooters, many gacha games) may refuse to start or may **ban accounts**. Arc Cache warns and asks for confirmation, but its detection is incomplete. When in doubt, don't use it on online games.
-- **Disk:** each game setup needs about **1.3 GB** for the driver copy (driver 9150), plus the cache itself, up to the size you choose, on the system drive (`%USERPROFILE%\AppData\LocalLow\Intel\ShaderCache`).
+- **Anti-cheat:** see [Anti-cheat and online games](#anti-cheat-and-online-games). In short: only for games where no anti-cheat runs while you play, and Riot games refuse to start while game-specific settings are on.
+- **Smart App Control** (Windows 11) may block the changed Intel DLL in a game's driver copy. This hasn't been tested yet; Arc Cache notes it in Recent actions when Smart App Control is on.
+- **Disk:** each game setup needs about **1.3 GB** for the driver copy (driver 9150), plus the cache itself on the system drive (`%USERPROFILE%\AppData\LocalLow\Intel\ShaderCache`). The cache file only grows as the game needs it: choosing 16 GB doesn't reserve 16 GB. Driver tests keep about 1.3 GB per cache size; Settings shows how much.
 - **RAM:** with very large caches, the driver can need roughly the cache file's size in RAM while loading it.
 - **D3D11 games:** only the D3D12 driver is changed. D3D11 caches stay at 512 MB.
 - **Microsoft Store / Xbox app games** are listed, but they are packaged apps, and private driver copies probably don't apply to them. This is untested.
 - **Driver updates:** a set-up game keeps loading its copy of the *old* driver until you set it up again. Whether an old copy works with a newer installed driver hasn't been tested yet. After an update, open Arc Cache and run **Check support**, then return set-up games to default and set them up again. Until then, Arc Cache blocks starting them from its own button; a start from Steam isn't blocked.
 - **Not affiliated with Intel or the SCSKiller authors.** Use at your own risk.
+
+## FAQ
+
+<details>
+<summary><b>Does choosing 16 GB take 16 GB of disk space?</b></summary>
+
+No. The size is a limit. The cache file starts small and only grows as the game compiles shaders. A large game with a full shader set typically ends up at a few hundred MB to a few GB.
+</details>
+
+<details>
+<summary><b>Does Arc Cache change my installed Intel driver?</b></summary>
+
+No. It copies the driver files into the game's folder and changes only that copy. The installed driver, other games and Windows security stay as they are.
+</details>
+
+<details>
+<summary><b>Why does it need administrator rights?</b></summary>
+
+Only for the Windows setting (`DevOverrideEnable` lives under `HKEY_LOCAL_MACHINE`). Arc Cache asks Windows for approval and reopens itself as administrator for that one change. Everything else runs as your normal user, and the installer doesn't need admin rights either.
+</details>
+
+<details>
+<summary><b>VALORANT / League of Legends won't start anymore.</b></summary>
+
+That's Riot Vanguard refusing `DevOverrideEnable`. Return your set-up games to default settings, turn game-specific settings off in **Settings**, restart Windows. See [Anti-cheat and online games](#anti-cheat-and-online-games).
+</details>
+
+<details>
+<summary><b>Can I get banned?</b></summary>
+
+If an anti-cheat runs while you play, yes, possibly, even in single-player. The driver copy is a modified DLL inside the game process. The most likely result is that the anti-cheat refuses to start the game, but a delayed ban can't be ruled out. Use Arc Cache only for games where no anti-cheat runs.
+</details>
+
+<details>
+<summary><b>What happens when Intel releases a new driver?</b></summary>
+
+Set-up games keep using their copy of the old driver. Open Arc Cache, run **Check support**, return set-up games to default settings and set them up again with the new driver.
+</details>
+
+<details>
+<summary><b>How do I remove everything?</b></summary>
+
+**Settings → Reset Arc Cache completely** returns every game to default, restores the previous Windows setting and deletes Arc Cache's data. The uninstaller warns if a game still has a driver copy.
+</details>
 
 ## Build from source
 
