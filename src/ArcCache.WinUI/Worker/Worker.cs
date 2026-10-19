@@ -254,11 +254,14 @@ class Worker {
     }
     [STAThread]static int Main(string[] args) {
         try {
-            if((args.Length>=2&&args.Length<=4)&&args[0]=="--cache-monitor") {
+            // --cache-monitor exe [cacheMiB] [linkedFile|-] [expectedBytes] [game name]
+            if((args.Length>=2&&args.Length<=6)&&args[0]=="--cache-monitor") {
                 MatchedSet.ValidateGame(args[1]);System.Windows.Forms.Application.EnableVisualStyles();
                 int recordedMiB=512;if(args.Length>=3&&!Int32.TryParse(args[2],out recordedMiB))throw new InvalidDataException("Invalid cache-size receipt value.");
-                string linkedFile=args.Length==4?args[3]:null;if(linkedFile!=null&&!System.Text.RegularExpressions.Regex.IsMatch(linkedFile,"^[0-9A-Fa-f]{64}$"))throw new InvalidDataException("Invalid cache file name.");
-                System.Windows.Forms.Application.Run(new CacheMonitor(args[1],delegate(string path){return recordedMiB==512?"Default cache size from the game setup record":(recordedMiB/1024.0).ToString("0.##",System.Globalization.CultureInfo.InvariantCulture)+" GiB from the game setup record";},null,null,linkedFile,recordedMiB));return 0;
+                string linkedFile=args.Length>=4&&args[3]!="-"?args[3]:null;if(linkedFile!=null&&!System.Text.RegularExpressions.Regex.IsMatch(linkedFile,"^[0-9A-Fa-f]{64}$"))throw new InvalidDataException("Invalid cache file name.");
+                long expectedBytes=0;if(args.Length>=5&&(!Int64.TryParse(args[4],System.Globalization.NumberStyles.None,System.Globalization.CultureInfo.InvariantCulture,out expectedBytes)||expectedBytes>(1L<<40)))throw new InvalidDataException("Invalid expected cache size.");
+                string gameName=args.Length==6?args[5]:null;if(gameName!=null&&(gameName.Length>200||gameName.Any(Char.IsControl)))throw new InvalidDataException("Invalid game name.");
+                System.Windows.Forms.Application.Run(new CacheMonitor(args[1],delegate(string path){return recordedMiB==512?"Default cache size from the game setup record":(recordedMiB/1024.0).ToString("0.##",System.Globalization.CultureInfo.InvariantCulture)+" GiB from the game setup record";},null,null,linkedFile,recordedMiB,expectedBytes,gameName));return 0;
             }
             string input=Console.In.ReadToEnd();if(input.Length>65536)throw new InvalidDataException("Request is too large.");
             var r=Json.Deserialize<Request>(input);if(r==null)throw new InvalidDataException("Request is empty.");
