@@ -10,6 +10,9 @@ public sealed record SteamGame(uint AppId, string Name, string InstallDirectory,
     public string SupportLabel => Source;
     public string? SetupBadge { get; init; }
     public bool HasSetupBadge => !string.IsNullOrWhiteSpace(SetupBadge);
+    /// <summary>"Ready" (set up and its load verified) gets the green badge; every other setup badge stays neutral.</summary>
+    public bool SetupReady => SetupBadge == "Ready";
+    public bool HasNeutralSetupBadge => HasSetupBadge && !SetupReady;
     public AntiCheatHint AntiCheat { get; init; } = AntiCheatHint.NotChecked;
     public bool HasAlwaysOnAntiCheat => AntiCheat.AlwaysOn;
     public bool HasOptionalAntiCheat => AntiCheat.Optional;

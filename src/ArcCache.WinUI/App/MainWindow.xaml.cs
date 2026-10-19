@@ -358,7 +358,13 @@ public partial class MainWindow : Window {
         try{
             using var doc=JsonDocument.Parse(File.ReadAllText(path));var root=doc.RootElement;
             if(root.TryGetProperty("Status",out var status)&&status.GetString()=="removed")return ("",game.Supported?"Not set up":"Game not detected yet");
-            return ("Set up","Set up"+(root.TryGetProperty("MiB",out var mib)&&mib.TryGetInt32(out int size)?" · "+SetupPresentation.Limit(size).Replace("512 MB","Default"):""));
+            // The setup record keeps whether the game's last check saw its driver copy load: verified = Ready, same words
+            // as the game's header. Opening the game re-checks its files and can still turn this into Needs attention.
+            int size=root.TryGetProperty("MiB",out var mib)&&mib.TryGetInt32(out int m)?m:0;
+            string label=size<=512?"Default":SetupPresentation.Limit(size);
+            string recorded=root.TryGetProperty("Status",out var st)?st.GetString()??"":"";
+            bool verified=size>0&&recorded==(size<=512?"original-control-loading-verified":"size-loading-verified");
+            return verified?("Ready","Ready to play · "+label):("Set up",size>0?"Set up · "+label:"Set up");
         }catch(Exception e) when (e is JsonException or IOException or UnauthorizedAccessException or InvalidOperationException){return ("Needs attention","Setup needs attention");}
     }
     void Filter(){
