@@ -51,6 +51,7 @@ class CacheMonitor : Form {
     [DllImport("kernel32.dll",SetLastError=true)]static extern IntPtr OpenProcess(uint access,bool inherit,uint pid);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern bool QueryFullProcessImageName(IntPtr process,uint flags,System.Text.StringBuilder path,ref uint length);
     [DllImport("kernel32.dll")]static extern bool CloseHandle(IntPtr handle);
+    [DllImport("user32.dll")]static extern bool SetWindowPos(IntPtr window,IntPtr after,int x,int y,int width,int height,uint flags);
     [DllImport("dwmapi.dll")]static extern int DwmSetWindowAttribute(IntPtr window,int attribute,ref int value,int size);
     protected override bool ShowWithoutActivation {get{return true;}}
     protected override CreateParams CreateParams {get{var p=base.CreateParams;p.ExStyle|=0x20|0x08000000|0x80;return p;}}
@@ -181,7 +182,9 @@ class CacheMonitor : Form {
             if(sampleCount++%5==0){bool found=false;try{foreach(ProcessModule m in p.Modules)if((m.ModuleName.Equals("igd12um64xe2.dll",StringComparison.OrdinalIgnoreCase)||m.ModuleName.Equals("igd12um64xe3.dll",StringComparison.OrdinalIgnoreCase)||m.ModuleName.Equals("igd12um64xeh.dll",StringComparison.OrdinalIgnoreCase))){found=true;string path=m.FileName;if(path==observedModulePath)break;observedModulePath=path;driverStatus=path.StartsWith(executable+".local\\",StringComparison.OrdinalIgnoreCase)?"Game setup: custom copy loaded":"Game setup: normal or other copy loaded";if(inspectDriver!=null){try{driverStatus+=" · "+inspectDriver(path);}catch{driverStatus+=" · size not checked";}}break;}if(!found){driverStatus="Game setup: not confirmed";observedModulePath=null;}}catch{driverStatus="Game setup: could not be checked";observedModulePath=null;}}
         }}catch{Close();return;}
         IntPtr front=GetForegroundWindow();uint foregroundPid;GetWindowThreadProcessId(front,out foregroundPid);Rect rect;
-        if(foregroundPid==gamePid&&GetWindowRect(front,out rect)){Location=Place(rect);if(!Visible)Show();}else if(Visible)Hide();
+        // Borderless games often make their own window topmost after the overlay opened (auto-start opens it at launch),
+        // which buries the overlay: put it back on top each sample, without moving, sizing or activating it.
+        if(foregroundPid==gamePid&&GetWindowRect(front,out rect)){Location=Place(rect);if(!Visible)Show();SetWindowPos(Handle,new IntPtr(-1),0,0,0,0,0x0001|0x0002|0x0010);}else if(Visible)Hide();
         var now=CacheSnapshot.Read(root);long growth=now.Bytes-initial.Bytes;int changed=now.ChangedSince(initial);
         if(sampleCount%5==1)try{DetectOpenFile(now);}catch(Exception){}
         string name=CacheName(now);long size;

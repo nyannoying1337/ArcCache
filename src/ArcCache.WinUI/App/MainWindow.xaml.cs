@@ -1203,7 +1203,8 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
             if(GameSummary(game).Badge is not ("Ready" or "Set up"))continue;
             if(!GameProcessRunning(exe)){if(overlaySuppressedKey==game.Key)overlaySuppressedKey=null;continue;}
             if(overlaySuppressedKey==game.Key)continue;
-            try{await StartCacheMonitor(game,ReceiptMiB(game));}catch(Exception e){overlaySuppressedKey=game.Key;Log("On-screen stats could not start for "+game.Name+": "+e.Message);}
+            try{await StartCacheMonitor(game,ReceiptMiB(game));}
+            catch(Exception e){overlaySuppressedKey=game.Key;if(GameProcessRunning(exe))Log("On-screen stats could not start for "+game.Name+": "+e.Message);} // a game that just closed needs no message
             return;
         }
     }
