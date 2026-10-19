@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/nyannoying1337/ArcCache/releases/latest"><img src="https://img.shields.io/badge/download-Windows_x64-36bff5?style=flat-square" alt="Windows x64 download" /></a>
-  <img src="https://img.shields.io/badge/release-2026.10.20-36bff5?style=flat-square" alt="Release 2026.10.20" />
+  <img src="https://img.shields.io/badge/release-2026.10.21-36bff5?style=flat-square" alt="Release 2026.10.21" />
   <img src="https://img.shields.io/badge/interface-WinUI_3-627d98?style=flat-square" alt="WinUI 3" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-7596b3?style=flat-square" alt="GPL-3.0-or-later" /></a>
 </p>
@@ -96,14 +96,21 @@ What Arc Cache does about it:
 
 > **When in doubt, don't.** No tool can promise that an anti-cheat accepts a modified driver file. A warning-free scan only means no *known* anti-cheat files were found.
 
-## What's new in 2026.10.20
+## What's new in 2026.10.21
+
+- **SCSKiller's numbers on the game page.** **Check available shaders** now fills the SCSKiller card: whether the game needs preparing, how many pipelines a compile creates, how long it takes, the cache file's size now next to the size SCSKiller expects and the game's cache size (with a warning when it won't fit), the last preparation and the last play. Results are kept per game. A check no longer looks like a compile.
+- **A real progress bar while preparing shaders.** Step 1 to 4, percent, compile jobs done, speed, time left, failures and the cache file's size. Done and Stopped say what happened and what stays in the cache.
+- **Green "Ready" badge.** Games whose driver copy was seen loading show a green **Ready** badge in My games and "Ready to play" on Home, the same words as their game page. Set-up games that still need a check keep a grey **Set up** badge.
+- **Cleaner pages.** All pages line up on one left edge with shorter lines; completed steps show one check mark; Home's title matches the menu; Settings explains a disabled button in one line; sizes read like "2.7 GB".
+
+<details>
+<summary><b>Older versions</b></summary>
+
+### What's new in 2026.10.20
 
 - **Anti-cheat games can be used anyway, at your own risk.** Blocked games (red badge, or an anti-cheat seen running) have a **Use Arc Cache with this game anyway…** button. It spells out what can happen (refused start, a delayed and possibly permanent or hardware-wide ban, single-player is no protection, nothing can undo it) and only continues after a checkbox and typing `BAN RISK`. A red banner stays on the game and can turn it off again.
 - **Always-on anti-cheat blocks setup.** Games with Riot Vanguard, EA Javelin, ACE and similar are now blocked before setup, the same way as games where an anti-cheat was seen running. The card explaining why is shown (it was missing before).
 - **The game list filter works right away.** Filter and search work while a check runs. Anti-cheat scan results are saved, so badges show immediately on the next start; only changed game folders are scanned again, with progress shown under the list.
-
-<details>
-<summary><b>Older versions</b></summary>
 
 ### What's new in 2026.10.19
 
@@ -145,8 +152,8 @@ What Arc Cache does about it:
 
 Get the latest release on the [**Releases page**](https://github.com/nyannoying1337/ArcCache/releases/latest):
 
-- **`ArcCache-Setup-2026.10.20-Windows-x64.exe`**: the installer, recommended. It installs for your Windows account only (no admin rights needed), adds a Start menu entry and updates an older Arc Cache in place.
-- **`ArcCache-2026.10.20-Windows-x64.zip`**: the portable version. Extract the **whole** ZIP and run `ArcCache.exe`.
+- **`ArcCache-Setup-2026.10.21-Windows-x64.exe`**: the installer, recommended. It installs for your Windows account only (no admin rights needed), adds a Start menu entry and updates an older Arc Cache in place.
+- **`ArcCache-2026.10.21-Windows-x64.zip`**: the portable version. Extract the **whole** ZIP and run `ArcCache.exe`.
 
 Each file has a `.sha256` next to it. Both are unsigned, so Windows SmartScreen may ask once. Arc Cache is self-contained, so you don't need .NET or anything else. It needs Windows 10 19041 or newer (tested on Windows 11) and an Intel Arc or Intel Xe graphics driver. A matching SCSKiller build is included in the `SCSKiller` folder.
 
