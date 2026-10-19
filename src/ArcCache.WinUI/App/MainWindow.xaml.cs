@@ -368,13 +368,28 @@ public partial class MainWindow : Window {
             return verified?("Ready","Ready to play · "+label):("Set up",size>0?"Set up · "+label:"Set up");
         }catch(Exception e) when (e is JsonException or IOException or UnauthorizedAccessException or InvalidOperationException){return ("Needs attention","Setup needs attention");}
     }
+    // Filter rebuilds the list to refresh badges after every selection. A new ItemsSource scrolls a ListView to the top,
+    // so when the same games are listed in the same order, the scroll position is put back.
+    static T? FindDescendant<T>(DependencyObject root) where T:DependencyObject{
+        for(int i=0;i<Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root);i++){
+            var child=Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root,i);
+            if(child is T hit)return hit;if(FindDescendant<T>(child) is T deeper)return deeper;
+        }
+        return null;
+    }
     void Filter(){
         synchronizingSelection=true;try{
+            var scroll=FindDescendant<ScrollViewer>(GamesList);double offset=scroll?.VerticalOffset??0;
+            var shownBefore=(GamesList.ItemsSource as IEnumerable<SteamGame>)?.Select(g=>g.Key).ToArray();
             string? id=selected?.Key;string query=Search.Text??"";string? source=SourceFilter.SelectedItem as string;string? status=GameStatusFilter.SelectedItem as string;
             var visible=games.Where(g=>g.Name.Contains(query,StringComparison.OrdinalIgnoreCase)&&(source is null||source=="All libraries"||g.Source==source))
                 .Select(g=>g with{SetupBadge=ListBadge(g),AntiCheat=sightings?.Get(g.Key) is { } seen?AntiCheatHint.Seen(seen):antiCheatHints.TryGetValue(g.Key,out var hint)?hint:AntiCheatHint.NotChecked})
                 .Where(g=>status is null||status=="All games"||status=="No anti-cheat found"&&g.AntiCheat.Level==AntiCheatLevel.NoneFound||status=="Anti-cheat"&&g.AntiCheat.Level is AntiCheatLevel.AlwaysOn or AntiCheatLevel.Optional||status=="Set up"&&g.HasSetupBadge&&g.SetupBadge!="Needs attention"&&g.SetupBadge!="Blocked"||status=="Needs attention"&&(g.SetupBadge=="Needs attention"||g.SetupBadge=="Blocked")).ToArray();
             GamesList.ItemsSource=visible;if(id!=null)GamesList.SelectedItem=visible.FirstOrDefault(g=>g.Key==id);
+            if(scroll!=null&&offset>0&&shownBefore!=null&&shownBefore.SequenceEqual(visible.Select(g=>g.Key))){
+                GamesList.UpdateLayout();scroll.ChangeView(null,offset,null,true);
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,()=>scroll.ChangeView(null,offset,null,true)); // after virtualized items are measured
+            }
             LibraryCount.Text=$"{visible.Length} of {games.Count} games";LibraryEmptyState.Visibility=Visibility.Collapsed;SearchEmptyState.Visibility=games.Count>0&&visible.Length==0?Visibility.Visible:Visibility.Collapsed;GamesList.Visibility=visible.Length==0?Visibility.Collapsed:Visibility.Visible;
         }finally{synchronizingSelection=false;}
     }
