@@ -262,6 +262,38 @@ Test("SCSKiller options, progress lines and build support are read correctly",()
     try{new ScsKillerBridge(settings).SaveOptions(new ScsKillerOptions(4,true,false));var loaded=new ScsKillerBridge(settings).Load().Options;Check(loaded==new ScsKillerOptions(4,true,false),"Options were not kept.");}
     finally{File.Delete(settings);}
 });
+Test("SCSKiller card reads shader counts, estimates and progress from one model",()=>{
+    var warming=ScsKillerBridge.ParseProgress("SCSKiller: 20:19:35 steam:1623730 Warming 1200/94165 (3 failed, 2 skipped: not in this install) 450/s - retrying ray tracing with fewer threads (8)");
+    Check(warming is {Failed:3,Skipped:2,PerSecond:450,Note:"retrying ray tracing with fewer threads (8)"},"Warming counts were not parsed.");
+    var view=ScsPresentation.Progress(false,warming,TimeSpan.FromSeconds(85),"cache file 528 MB of 16 GB","16 GB driver copy confirmed");
+    Check(view.Percent is >1.2 and <1.3&&view.Headline=="Step 4 of 4: Compiling · 1%","Progress headline: "+view.Headline);
+    Check(view.Detail.Contains("1,200 of 94,165 compile jobs"),"Counts missing: "+view.Detail);
+    Check(view.Detail.Contains("per second")&&view.Detail.Contains("left")&&view.Detail.Contains("3 failed")&&view.Detail.Contains("528 MB of 16 GB")&&view.Detail.Contains("running 1:25"),"Progress detail incomplete: "+view.Detail);
+    Check(ScsPresentation.Progress(false,ScsKillerBridge.ParseProgress("20:19:15 steam:1 Indexing"),TimeSpan.FromSeconds(5),null,null) is {Percent:null,Headline:"Step 1 of 4: Reading the game's shaders"},"Early step not indeterminate.");
+    Check(ScsPresentation.Progress(false,warming,TimeSpan.FromMinutes(31),null,null,done:true) is {Percent:100,Headline:"Done · 1,200 compile jobs in 31 min"},"Done must read Done at 100%.");
+    Check(ScsPresentation.Progress(false,warming,TimeSpan.FromMinutes(3),null,null,stopped:true).Detail.Contains("stays in the cache"),"Stopped must say what is kept.");
+    string[] output=["Elden Ring (steam:1245620, Steam)","  install    C:/Games/ELDEN RING","  status     Ready: ready to compile","  anti-cheat None","  shaders    1234567",
+        "  plan       90000 recorded + 4165 generated + 0 DirectX 11 shaders + 2 middleware, 12 root sigs, rule verified: True","  estimate   1,2 GB of cache, 0:35:10",
+        "  warmed     2026-10-19 22:41 for driver 32.0.101.8132 in 0:31:12; 3 failed (the driver rejected them)",
+        "  last play  1:02:03, 5000 pipelines: 4000 from the game's library, 900 cache hits, 100 compiles (worst 45.5 ms)","  1st launch -"];
+    var status=ScsPresentation.ParseStatus(output.Select(l=>"SCSKiller: "+l),DateTime.UtcNow);
+    Check(status is {Status:"Ready",ShadersInGame:1234567,Recorded:90000,Generated:4165,Pipelines:94165,LastPlayCompiles:100,LastPlayWorstMs:"45.5"},"Status detail not parsed.");
+    Check(status!.EstimateBytes is >1200L<<20 and <1300L<<20&&status.EstimateTime==new TimeSpan(0,35,10)&&status.WarmTime==new TimeSpan(0,31,12)&&status.WarmedAt?.Day==19,"Estimate or warm not parsed.");
+    var view2=ScsPresentation.DetailView(status,512,528L<<20,true);string Row(ScsDetailView v,string label)=>v.Rows.FirstOrDefault(r=>r.Label==label).Value??"";
+    Check(view2.Title=="Ready to prepare"&&view2.Reason=="Ready to compile.","Title or reason: "+view2.Title+" / "+view2.Reason);
+    Check(Row(view2,"Cache file")=="528 MB of 512 MB"&&Row(view2,"Estimated need")=="about 1.2 GB"&&Row(view2,"Time to prepare")=="about 35 min","Cache rows: "+string.Join(" | ",view2.Rows));
+    Check(Row(view2,"Pipelines")=="94,165 (90,000 recorded, 4,165 generated) from 1,234,567 shaders","Numbers must use one format: "+Row(view2,"Pipelines"));
+    Check(Row(view2,"Last prepared").Contains("31 min")&&Row(view2,"Not compiled").Contains("3 failed")&&view2.Warning!.Contains("more than the cache size"),"Last prepared or warning missing.");
+    Check(ScsPresentation.DetailView(status,16384).Warning==null,"A 16 GB cache size was warned about a 1.2 GB estimate.");
+    var warmed=ScsPresentation.DetailView(status with{Status="Warmed"},16384,801L<<20,true);
+    Check(Row(warmed,"Estimated need")==""&&Row(warmed,"Time to prepare")==""&&Row(warmed,"Cache file")=="801 MB of 16 GB","After preparing, the real cache file replaces the estimate.");
+    var notChecked=ScsPresentation.DetailView(null,512);
+    Check(notChecked.Title=="Not checked yet"&&notChecked.Reason==ScsPresentation.NotChecked&&notChecked.Rows.Single()==("Cache file","not linked yet · limit 512 MB"),"Unchecked game must show what a check tells and the cache file.");
+    var noted=warming! with{Note="15 failed (the driver rejected them), 510 skipped"};
+    var finished=ScsPresentation.Progress(false,noted,TimeSpan.FromMinutes(3),"cache file 801 MB of 16 GB","16 GB driver copy confirmed",done:true);
+    Check(finished.Headline.StartsWith("Done · 1,200 compile jobs")&&finished.Detail.Split("failed").Length==2,"Done must not repeat the failed count: "+finished.Detail);
+    Check(ScsPresentation.ParseStatus(["error: no game matches 'steam:1'"],DateTime.UtcNow)==null,"An error was read as a status.");
+});
 Test("Old session logs and overlay CSVs are pruned, nothing else",()=>{
     string root=Path.Combine(Path.GetTempPath(),"ArcLogs-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
     try{

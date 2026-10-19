@@ -38,6 +38,7 @@ public partial class MainWindow : Window {
     ScsKillerBridge? scs;
     CancellationTokenSource? scsCancellation;
     ScsKillerInfo? scsInfo;bool scsInfoChecking,scsOptionsLoading;string? scsProgressGameKey;
+    Dictionary<string,ScsKillerGameStatus> scsStatuses=new(StringComparer.OrdinalIgnoreCase);string? scsStatusPath;
     CacheFileMap? cacheFiles;
     CancellationTokenSource? driverTrialCancellation;
     int trialProgressPercent;
@@ -110,6 +111,7 @@ public partial class MainWindow : Window {
         Activated+=async (_,e)=>{if(e.WindowActivationState!=WindowActivationState.Deactivated)await CheckDriverChanged();};
         discoveryTimer.Tick+=async (_,_)=>await PollGame();
         try{scs=new ScsKillerBridge(Path.Combine(store.Root,"scskiller-bridge.json")).Load();string bundled=Path.Combine(AppContext.BaseDirectory,"SCSKiller","cli","scskiller.exe");if(scs.CliPath==null&&File.Exists(bundled))scs.SelectCli(bundled);ScsPath.Text=scs.CliPath??"Choose the SCSKiller command-line program (scskiller.exe).";}catch(Exception e){Log("SCSKiller configuration could not be read: "+e.Message);scs=new ScsKillerBridge(Path.Combine(store.Root,"scskiller-bridge.json"));}
+        scsStatusPath=Path.Combine(store.Root,"scskiller-status.json");scsStatuses=ScsPresentation.LoadStatuses(scsStatusPath);
         cacheFiles=new CacheFileMap(Path.Combine(store.Root,"cache-files.json"));sightings=new AntiCheatSightings(Path.Combine(store.Root,"anticheat-sightings.json"));hintCache=new AntiCheatHintCache(Path.Combine(store.Root,"anticheat-hints.json"));overrides=new AntiCheatOverrides(Path.Combine(store.Root,"anticheat-overrides.json"));ShowScsOptions();DispatcherQueue.TryEnqueue(async()=>await RefreshScsInfo());
     }
 #if DEBUG
@@ -344,14 +346,20 @@ public partial class MainWindow : Window {
         if(PreviewOnlyFeedback()||selected is null||overrides is null)return;overrides.Clear(selected.Key);
         Log($"Anti-cheat risk no longer accepted for {selected.Name}."+(selectedReceipt is not null&&selectedReceipt.Status!="removed"?" Choose Use default settings to remove its driver copy.":""));RenderMyGames();
     }
-    string ListBadge(SteamGame game){
-        if(developerMyGamesPreview)return selected?.Key==game.Key?myGamesPageState?.ListBadge??string.Empty:string.Empty;
-        if(selected?.Key==game.Key&&myGamesPageState?.Key=="game-uninstalled")return "Not installed";
-        if(selected?.Key==game.Key&&myGamesPageState?.Key=="blocked-by-another-mod")return "Blocked";
-        if(selected?.Key==game.Key&&myGamesPageState?.Key is "setup-needs-attention" or "problem-normal-driver" or "problem-check-failed" or "problem-recovery" or "problem-size-normal-driver")return "Needs attention";
-        if(selected?.Key==game.Key&&myGamesPageState?.Key is "default-verified" or "size-verified")return "Verified";
-        string path=store.Receipt(game);if(!File.Exists(path))return string.Empty;
-        try{using var doc=JsonDocument.Parse(File.ReadAllText(path));string status=doc.RootElement.TryGetProperty("Status",out var property)?property.GetString()??"":"";return status=="removed"?string.Empty:"Set up";}catch{return "Needs attention";}
+    string ListBadge(SteamGame game)=>GameSummary(game).Badge;
+    /// <summary>The one short description of a game used by its list badge and Home's recent games. The selected game uses
+    /// its page state (the same words as its header); others only have their saved setup record to go by.
+    /// The anti-cheat pill already shows anti-cheat, so the badge doesn't repeat it.</summary>
+    (string Badge,string Line) GameSummary(SteamGame game){
+        if(selected?.Key==game.Key&&myGamesPageState is {} state)return (state.ListBadge=="Anti-cheat"?"":state.ListBadge,state.HeaderStatus);
+        if(developerMyGamesPreview)return ("","");
+        string path=store.Receipt(game);
+        if(!File.Exists(path))return ("",game.Supported?"Not set up":"Game not detected yet");
+        try{
+            using var doc=JsonDocument.Parse(File.ReadAllText(path));var root=doc.RootElement;
+            if(root.TryGetProperty("Status",out var status)&&status.GetString()=="removed")return ("",game.Supported?"Not set up":"Game not detected yet");
+            return ("Set up","Set up"+(root.TryGetProperty("MiB",out var mib)&&mib.TryGetInt32(out int size)?" · "+SetupPresentation.Limit(size).Replace("512 MB","Default"):""));
+        }catch(Exception e) when (e is JsonException or IOException or UnauthorizedAccessException or InvalidOperationException){return ("Needs attention","Setup needs attention");}
     }
     void Filter(){
         synchronizingSelection=true;try{
@@ -652,7 +660,7 @@ public partial class MainWindow : Window {
         var scsPrivateWarm=CreateScsPrivateWarm();
         ScsCompileButton.IsEnabled=ScsStatusButton.IsEnabled&&(selectedReceipt?.MiB<=512||scsPrivateWarm!=null&&scsInfo?.PrivateDriverSupport==true);
         ScsSummary.Text=selected?.Source!="Steam"?"SCSKiller is currently available for Steam games.":selectedReceipt?.MiB>512
-            ?scsPrivateWarm!=null?$"SCSKiller can warm this game's cache using its verified {SetupPresentation.Limit(scsPrivateWarm.CacheMiB)} driver copy. This does not measure cache capacity.":"This game's larger driver copy is not verified for shader preparation. Fix the game setup or return it to Default first."
+            ?scsPrivateWarm!=null?$"Compiles this game's shaders ahead of time with its {SetupPresentation.Limit(scsPrivateWarm.CacheMiB)} driver copy, so they stay in the cache.":"This game's larger driver copy is not verified for shader preparation. Fix the game setup or return it to Default first."
             :scs?.CliPath is null||developerMyGamesPreview?"Choose the SCSKiller command-line program in Settings first. Default uses the normal Intel driver.":"Optional: prepare shaders with your existing SCSKiller account. Default uses the normal Intel driver.";
         RenderScsTool();
         RestoreButton.Visibility=setupState?.ReceiptExists==true&&state.Key is not "empty-library" and not "no-selection"?Visibility.Visible:Visibility.Collapsed;
@@ -809,7 +817,7 @@ public partial class MainWindow : Window {
         bool chosenLimitAvailable=CapChoice.SelectedItem is ComboBoxItem selectedCap&&LimitAvailable(int.Parse(selectedCap.Tag.ToString()!));
         ApplyButton.IsEnabled=!busy&&supported&&GameDriverReady&&routingReady&&chosenLimitAvailable&&(configured||setupState?.CanPrepare==true)&&!NeedsControlObservation();
         RestoreButton.IsEnabled=!busy&&selected?.SupportedExecutable!=null&&recordValid&&selectedReceipt?.Status!="removed";LaunchButton.IsEnabled=!busy&&selected!=null;ImportButton.IsEnabled=!busy&&selected!=null;CapChoice.IsEnabled=!busy&&supported;
-        RestoreButton.Content="Undo setup for this game";
+        RestoreButton.Content="Use default settings…";
         if(setupState?.FolderExists==true&&!routingReady)LaunchButton.IsEnabled=false;
         if(setupState?.FolderExists==true&&(!configured||!GameDriverReady))LaunchButton.IsEnabled=false;
         ApplyButton.Content=NeedsControlObservation()?"Start the game to check setup":configured?"Apply this cache size":"Set up this game";
@@ -830,7 +838,7 @@ public partial class MainWindow : Window {
         var scsPrivateWarm=CreateScsPrivateWarm();
         ScsCompileButton.IsEnabled=ScsStatusButton.IsEnabled&&(!configured||selectedReceipt?.MiB<=512||scsPrivateWarm!=null&&scsInfo?.PrivateDriverSupport==true);
         ScsSummary.Text=selected?.Source!="Steam"?"SCSKiller integration currently supports Steam games only.":configured&&selectedReceipt?.MiB>512
-            ?scsPrivateWarm!=null?$"SCSKiller will use this game's verified {SetupPresentation.Limit(scsPrivateWarm.CacheMiB)} driver copy for shader preparation. Cache capacity is not measured.":"This larger driver copy is not verified for shader preparation. Fix the game setup or return it to Default first."
+            ?scsPrivateWarm!=null?$"Compiles this game's shaders ahead of time with its {SetupPresentation.Limit(scsPrivateWarm.CacheMiB)} driver copy, so they stay in the cache.":"This larger driver copy is not verified for shader preparation. Fix the game setup or return it to Default first."
             : "SCSKiller prepares shaders with the normal driver and Default size. Community downloads need your existing SCSKiller account and settings.";
         RenderScsTool();
     }
@@ -974,7 +982,8 @@ public partial class MainWindow : Window {
         else TrialStage.Text=TrialProgress.Value>=100?"Done":string.Empty;
         RenderTrialLog();
         GraphicsFinishCard.Visibility=state.ShowFinish?Visibility.Visible:Visibility.Collapsed;GraphicsFinishTitle.Text=state.FinishText;GraphicsFinishSizes.Text="Cache sizes available: "+state.CacheSizes;ChooseGameButton.Content=state.AccentButton;ChooseGameButton.IsEnabled=!busy;
-    }    async Task GraphicsStats(){if(graphicsStatsBusy||closing)return;graphicsStatsBusy=true;try{var reply=await safety.RunAsync(new("GraphicsStats",ReadOnly:true));if(!reply.Ok)throw new IOException(reply.Message);var d=reply.Data;ulong total=d.GetProperty("RamTotal").GetUInt64(),available=d.GetProperty("RamAvailable").GetUInt64();long disk=d.GetProperty("DiskBytes").GetInt64();graphicsCacheBaseline??=disk;GraphicsRam.Text=$"{(total-available)/1073741824.0:0.0} / {total/1073741824.0:0.0} GB";GraphicsCache.Text=$"{disk/1048576.0:0.0} MB · {d.GetProperty("Files").GetInt32()} files";GraphicsStatsStatus.Text=$"Change since opening: {(disk-graphicsCacheBaseline.Value)/1048576.0:+0.0;-0.0;0.0} MB · unreadable files: {d.GetProperty("Unreadable").GetInt32()} · checked {DateTime.Now:HH:mm:ss}";}catch(Exception e){GraphicsStatsStatus.Text="Statistics unavailable: "+PlainLanguage.Error(e.Message);}finally{graphicsStatsBusy=false;}}
+    }    async Task GraphicsStats(){if(graphicsStatsBusy||closing)return;graphicsStatsBusy=true;try{var reply=await safety.RunAsync(new("GraphicsStats",ReadOnly:true));if(!reply.Ok)throw new IOException(reply.Message);var d=reply.Data;ulong total=d.GetProperty("RamTotal").GetUInt64(),available=d.GetProperty("RamAvailable").GetUInt64();long disk=d.GetProperty("DiskBytes").GetInt64();graphicsCacheBaseline??=disk;GraphicsRam.Text=$"{(total-available)/1073741824.0:0.0} / {total/1073741824.0:0.0} GB";GraphicsCache.Text=$"{ScsPresentation.Size(disk)} · {d.GetProperty("Files").GetInt32()} files";long grew=disk-graphicsCacheBaseline.Value;int unreadable=d.GetProperty("Unreadable").GetInt32();
+            GraphicsStatsStatus.Text=string.Join(" · ",new[]{"Shared by all games",grew!=0?$"{(grew>0?"+":"−")}{ScsPresentation.Size(Math.Abs(grew))} since Arc Cache opened":null,unreadable>0?$"{unreadable} files unreadable":null,$"checked {DateTime.Now:t}"}.OfType<string>());}catch(Exception e){GraphicsStatsStatus.Text="Statistics unavailable: "+PlainLanguage.Error(e.Message);}finally{graphicsStatsBusy=false;}}
     async void RefreshGraphicsStats(object sender,RoutedEventArgs e)=>await GraphicsStats();
     async void TryDriverPatch(object sender,RoutedEventArgs e){
         if(PreviewOnlyFeedback())return;
@@ -1044,21 +1053,21 @@ public partial class MainWindow : Window {
         HomeGraphicsDriver.Text=pageState.CheckState==GraphicsCheckState.NoIntel?"Driver not available":string.IsNullOrWhiteSpace(homeVersion)?"Driver details unavailable":"Driver "+homeVersion;
         if(developerStatePreview){RefreshHomePreview(pageState);return;}
 bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheckState.Running;HomeSetupButton.Visibility=checking||pageState.IsBusy?Visibility.Collapsed:Visibility.Visible;
-        if(checking){HomeSetupLabel.Text="CHECKING SETUP";HomeSetupTitle.Text=pageState.HomeTitle;HomeSetupDetails.Text="Arc Cache is checking your Intel graphics and Windows setting.";HomeWelcomeText.Text="Arc Cache is checking your Intel graphics and Windows setting.";HomeSetupButton.Visibility=Visibility.Collapsed;HomeRoutingStatus.Text="Checking…";HomeRoutingDetails.Text="Waiting for the graphics check.";HomeSetupCard.Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,39,41,45));HomeSetupCard.BorderBrush=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,65,69,76));}
-        else if(pageState.CheckState is GraphicsCheckState.Failed or GraphicsCheckState.NoIntel){HomeSetupLabel.Text="GRAPHICS CHECK";HomeSetupTitle.Text=pageState.HomeTitle;HomeSetupDetails.Text="Open Graphics to review the message and try again.";HomeSetupButton.Content="Open Graphics";HomeSetupButton.Tag="Graphics";HomeWelcomeText.Text=pageState.HomeTitle;HomeRoutingStatus.Text="Needs attention";HomeRoutingDetails.Text="Open Graphics to see what to do next.";}
-        else if(driverOriginal&&routingReady){HomeSetupLabel.Text="SETUP COMPLETE";HomeSetupTitle.Text="Windows is ready for game-specific settings";HomeSetupDetails.Text=$"{homeAdapter} · Driver {homeVersion}";HomeSetupButton.Content="Set up a game";HomeSetupButton.Tag="Library";HomeWelcomeText.Text="Your graphics are ready. Pick a game to get started.";HomeSetupCard.Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,24,56,44));HomeSetupCard.BorderBrush=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,40,90,67));HomeRoutingStatus.Text="On";HomeRoutingStatus.Foreground=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,127,225,174));HomeRoutingDetails.Text="Needed for per-game driver copies.";}
-        else if(pageState.CurrentStep==GraphicsStep.DriverCopy&&pageState.IsBusy){HomeSetupLabel.Text="DRIVER COPY TEST";HomeSetupTitle.Text="Testing driver copy";HomeSetupDetails.Text="Your installed driver and game files are unchanged.";HomeWelcomeText.Text="The graphics check passed. A driver copy is being tested.";HomeSetupButton.Visibility=Visibility.Collapsed;HomeRoutingStatus.Text=pageState.Step2Result;HomeRoutingDetails.Text="Needed for per-game driver copies.";}
-        else if(pageState.PrimaryAction==GraphicsPrimaryAction.TestDriverCopy){HomeSetupLabel.Text="ONE STEP LEFT";HomeSetupTitle.Text="Test the driver copy";HomeSetupDetails.Text="Open Graphics to run the separate driver-copy check.";HomeSetupButton.Content="Open Graphics";HomeSetupButton.Tag="Graphics";HomeWelcomeText.Text="Run a separate driver-copy test before game setup.";HomeRoutingStatus.Text=pageState.Step2Result;HomeRoutingDetails.Text="Needed for per-game driver copies.";}
-        else if(!driverOriginal&&successfulTrial!=null&&routingReady){HomeSetupLabel.Text="GRAPHICS CHECK PASSED";HomeSetupTitle.Text="Choose a game to continue";HomeSetupDetails.Text="Your normal driver is unchanged. Arc Cache will guide you through game setup.";HomeSetupButton.Content="Set up a game";HomeSetupButton.Tag="Library";HomeWelcomeText.Text="The graphics check passed. Choose a game to continue.";HomeSetupCard.Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,31,43,55));HomeSetupCard.BorderBrush=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,58,79,101));HomeRoutingStatus.Text="On";HomeRoutingStatus.Foreground=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,127,225,174));HomeRoutingDetails.Text="Needed for per-game driver copies.";}
-        else if(pageState.Step2Result=="Restart required"){HomeSetupLabel.Text="RESTART WINDOWS";HomeSetupTitle.Text="Restart Windows to finish setup";HomeSetupDetails.Text="Save your work, restart, then return here to choose a game.";HomeSetupButton.Content="View Graphics";HomeSetupButton.Tag="Graphics";HomeWelcomeText.Text="One restart is needed to finish setup.";HomeSetupCard.Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,48,43,30));HomeSetupCard.BorderBrush=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,104,82,38));HomeRoutingStatus.Text="Restart needed";HomeRoutingDetails.Text="Restart Windows to finish.";}
-        else {HomeSetupLabel.Text=successfulTrial!=null?"GRAPHICS CHECK PASSED":"ONE STEP LEFT";HomeSetupTitle.Text=successfulTrial!=null?"Finish Windows setup to use this copy":"Enable game-specific settings";HomeSetupDetails.Text=successfulTrial!=null?"The graphics test passed. Open Graphics to turn on the Windows setting.":driverOriginal?"Open Graphics and turn on the Windows setting. A restart may be needed.":"Open Graphics to check whether your Intel driver is supported.";HomeSetupButton.Content=driverOriginal||successfulTrial!=null?"Finish setup":"Check support";HomeSetupButton.Tag="Graphics";HomeWelcomeText.Text=successfulTrial!=null?"One Windows setting remains before game setup.":driverOriginal?"Finish the Windows setup, then choose a game.":"Check your Intel graphics, then choose a game.";HomeSetupCard.Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,48,43,30));HomeSetupCard.BorderBrush=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,104,82,38));HomeRoutingStatus.Text=driverOriginal||successfulTrial!=null?"Off":"Not checked";HomeRoutingStatus.Foreground=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,250,190,95));HomeRoutingDetails.Text=driverOriginal||successfulTrial!=null?"Turn it on in Graphics.":"Check support on the Graphics page.";}
+        if(checking){HomeSetupLabel.Text="CHECKING SETUP";HomeSetupTitle.Text=pageState.HomeTitle;HomeSetupDetails.Text="Arc Cache is checking your Intel graphics and Windows setting.";HomeSetupButton.Visibility=Visibility.Collapsed;HomeRoutingStatus.Text="Checking…";HomeRoutingDetails.Text="Waiting for the graphics check.";HomeSetupCard.Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,39,41,45));HomeSetupCard.BorderBrush=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,65,69,76));}
+        else if(pageState.CheckState is GraphicsCheckState.Failed or GraphicsCheckState.NoIntel){HomeSetupLabel.Text="GRAPHICS CHECK";HomeSetupTitle.Text=pageState.HomeTitle;HomeSetupDetails.Text="Open Graphics to review the message and try again.";HomeSetupButton.Content="Open Graphics";HomeSetupButton.Tag="Graphics";HomeRoutingStatus.Text="Needs attention";HomeRoutingDetails.Text="Open Graphics to see what to do next.";}
+        else if(driverOriginal&&routingReady){HomeSetupLabel.Text="SETUP COMPLETE";HomeSetupTitle.Text="Windows is ready for game-specific settings";HomeSetupDetails.Text=$"{homeAdapter} · Driver {homeVersion}";HomeSetupButton.Content="Choose a game";HomeSetupButton.Tag="Library";HomeSetupCard.Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,24,56,44));HomeSetupCard.BorderBrush=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,40,90,67));HomeRoutingStatus.Text="On";HomeRoutingStatus.Foreground=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,127,225,174));HomeRoutingDetails.Text="Needed for per-game driver copies.";}
+        else if(pageState.CurrentStep==GraphicsStep.DriverCopy&&pageState.IsBusy){HomeSetupLabel.Text="DRIVER COPY TEST";HomeSetupTitle.Text="Testing driver copy";HomeSetupDetails.Text="Your installed driver and game files are unchanged.";HomeSetupButton.Visibility=Visibility.Collapsed;HomeRoutingStatus.Text=pageState.Step2Result;HomeRoutingDetails.Text="Needed for per-game driver copies.";}
+        else if(pageState.PrimaryAction==GraphicsPrimaryAction.TestDriverCopy){HomeSetupLabel.Text="ONE STEP LEFT";HomeSetupTitle.Text="Test the driver copy";HomeSetupDetails.Text="Open Graphics to run the separate driver-copy check.";HomeSetupButton.Content="Open Graphics";HomeSetupButton.Tag="Graphics";HomeRoutingStatus.Text=pageState.Step2Result;HomeRoutingDetails.Text="Needed for per-game driver copies.";}
+        else if(!driverOriginal&&successfulTrial!=null&&routingReady){HomeSetupLabel.Text="GRAPHICS CHECK PASSED";HomeSetupTitle.Text="Choose a game to set up";HomeSetupDetails.Text="Your installed driver stays unchanged. Each game gets its own driver copy.";HomeSetupButton.Content="Choose a game";HomeSetupButton.Tag="Library";HomeSetupCard.Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,31,43,55));HomeSetupCard.BorderBrush=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,58,79,101));HomeRoutingStatus.Text="On";HomeRoutingStatus.Foreground=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,127,225,174));HomeRoutingDetails.Text="Needed for per-game driver copies.";}
+        else if(pageState.Step2Result=="Restart required"){HomeSetupLabel.Text="RESTART WINDOWS";HomeSetupTitle.Text="Restart Windows to finish setup";HomeSetupDetails.Text="Save your work, restart, then return here to choose a game.";HomeSetupButton.Content="View Graphics";HomeSetupButton.Tag="Graphics";HomeSetupCard.Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,48,43,30));HomeSetupCard.BorderBrush=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,104,82,38));HomeRoutingStatus.Text="Restart needed";HomeRoutingDetails.Text="Restart Windows to finish.";}
+        else {HomeSetupLabel.Text=successfulTrial!=null?"GRAPHICS CHECK PASSED":"ONE STEP LEFT";HomeSetupTitle.Text=successfulTrial!=null?"Finish Windows setup to use this copy":"Enable game-specific settings";HomeSetupDetails.Text=successfulTrial!=null?"The graphics test passed. Open Graphics to turn on the Windows setting.":driverOriginal?"Open Graphics and turn on the Windows setting. A restart may be needed.":"Open Graphics to check whether your Intel driver is supported.";HomeSetupButton.Content=driverOriginal||successfulTrial!=null?"Finish setup":"Check support";HomeSetupButton.Tag="Graphics";HomeSetupCard.Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,48,43,30));HomeSetupCard.BorderBrush=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,104,82,38));HomeRoutingStatus.Text=driverOriginal||successfulTrial!=null?"Off":"Not checked";HomeRoutingStatus.Foreground=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,250,190,95));HomeRoutingDetails.Text=driverOriginal||successfulTrial!=null?"Turn it on in Graphics.":"Check support on the Graphics page.";}
         SetHomeEyebrowTone(pageState.CheckState is GraphicsCheckState.Failed or GraphicsCheckState.NoIntel,pageState.ShowFinish||HomeSetupLabel.Text is "SETUP COMPLETE" or "GRAPHICS CHECK PASSED");
         if(developerStatePreview){HomeSetupButton.Visibility=Visibility.Collapsed;HomeRecentGames.Children.Clear();HomeEmptyGames.Text="No games are loaded in this fake-data preview.";HomeEmptyGames.Visibility=Visibility.Visible;return;}
         var recents=store.ReadRecentGames().Select(k=>games.FirstOrDefault(g=>string.Equals(g.Key,k,StringComparison.OrdinalIgnoreCase))).Where(g=>g!=null).Cast<SteamGame>().ToList();if(recents.Count==0)recents.AddRange(games.Where(g=>File.Exists(store.Receipt(g))).OrderByDescending(g=>File.GetLastWriteTimeUtc(store.Receipt(g))));if(selected!=null&&!recents.Any(g=>g.Key==selected.Key))recents.Insert(0,selected);foreach(var game in games)if(recents.Count<3&&!recents.Any(g=>g.Key==game.Key))recents.Add(game);HomeRecentGames.Children.Clear();HomeEmptyGames.Visibility=recents.Count==0?Visibility.Visible:Visibility.Collapsed;
-        foreach(var game in recents.Take(3)){bool hasSavedSetup=File.Exists(store.Receipt(game));string status=game.Key==selected?.Key?(setupState?.Configured==true&&selectedReceipt!=null?SetupPresentation.Limit(selectedReceipt.MiB)+" private copy":setupState?.Error!=null?"Setup needs attention":hasSavedSetup?"Saved setup · open to check":"Not set up · Choose a cache size"):hasSavedSetup?"Saved setup · open to check":game.Supported?"Select to review this game's setup":"Start this game once so Arc Cache can find its files";var row=new Grid{ColumnSpacing=12,Margin=new Thickness(12)};row.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(38)});row.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1,GridUnitType.Star)});row.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});var initials=new TextBlock{Text=string.Concat(game.Name.Split(' ',StringSplitOptions.RemoveEmptyEntries).Take(2).Select(s=>char.ToUpperInvariant(s[0]))),FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};var tileContent=new Grid();tileContent.Children.Add(initials);var icon=ArtworkImages.Get(game.IconSources,76);if(icon!=null){var image=new Image{Source=icon,Stretch=Microsoft.UI.Xaml.Media.Stretch.UniformToFill};image.ImageFailed+=(_,_)=>image.Opacity=0;tileContent.Children.Add(image);}var tile=new Border{Width=38,Height=38,CornerRadius=new CornerRadius(8),Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,55,70,78)),Child=tileContent};Grid.SetColumn(tile,0);row.Children.Add(tile);var labels=new StackPanel{Spacing=2,VerticalAlignment=VerticalAlignment.Center};labels.Children.Add(new TextBlock{Text=game.Name,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,TextTrimming=TextTrimming.CharacterEllipsis});labels.Children.Add(new TextBlock{Text=game.Source+" · "+status,FontSize=12,Foreground=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,180,180,180)),TextTrimming=TextTrimming.CharacterEllipsis});Grid.SetColumn(labels,1);row.Children.Add(labels);var arrow=new FontIcon{Glyph="\uE76C",FontSize=12,VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(arrow,2);row.Children.Add(arrow);var surface=new Border{CornerRadius=new CornerRadius(9),BorderThickness=new Thickness(1),BorderBrush=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,65,69,76)),Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,39,41,45)),Child=row};var button=new Button{Tag=game.Key,Content=surface,Padding=new Thickness(0),Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0,0,0,0)),BorderThickness=new Thickness(0),HorizontalContentAlignment=HorizontalAlignment.Stretch,HorizontalAlignment=HorizontalAlignment.Stretch};button.Click+=HomeGameClicked;HomeRecentGames.Children.Add(button);}
+        foreach(var game in recents.Take(3)){string status=GameSummary(game).Line;var row=new Grid{ColumnSpacing=12,Margin=new Thickness(12)};row.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(38)});row.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1,GridUnitType.Star)});row.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});var initials=new TextBlock{Text=string.Concat(game.Name.Split(' ',StringSplitOptions.RemoveEmptyEntries).Take(2).Select(s=>char.ToUpperInvariant(s[0]))),FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};var tileContent=new Grid();tileContent.Children.Add(initials);var icon=ArtworkImages.Get(game.IconSources,76);if(icon!=null){var image=new Image{Source=icon,Stretch=Microsoft.UI.Xaml.Media.Stretch.UniformToFill};image.ImageFailed+=(_,_)=>image.Opacity=0;tileContent.Children.Add(image);}var tile=new Border{Width=38,Height=38,CornerRadius=new CornerRadius(8),Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,55,70,78)),Child=tileContent};Grid.SetColumn(tile,0);row.Children.Add(tile);var labels=new StackPanel{Spacing=2,VerticalAlignment=VerticalAlignment.Center};labels.Children.Add(new TextBlock{Text=game.Name,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,TextTrimming=TextTrimming.CharacterEllipsis});labels.Children.Add(new TextBlock{Text=game.Source+" · "+status,FontSize=12,Foreground=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,180,180,180)),TextTrimming=TextTrimming.CharacterEllipsis});Grid.SetColumn(labels,1);row.Children.Add(labels);var arrow=new FontIcon{Glyph="\uE76C",FontSize=12,VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(arrow,2);row.Children.Add(arrow);var surface=new Border{CornerRadius=new CornerRadius(9),BorderThickness=new Thickness(1),BorderBrush=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,65,69,76)),Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,39,41,45)),Child=row};var button=new Button{Tag=game.Key,Content=surface,Padding=new Thickness(0),Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0,0,0,0)),BorderThickness=new Thickness(0),HorizontalContentAlignment=HorizontalAlignment.Stretch,HorizontalAlignment=HorizontalAlignment.Stretch};button.Click+=HomeGameClicked;HomeRecentGames.Children.Add(button);}
     }
     void RefreshHomePreview(GraphicsPageState state){
-        HomeWelcomeText.Text="Graphics setup status and your recent games.";
+        
         HomeRecentGames.Children.Clear();HomeEmptyGames.Text="No games are loaded in this fake-data preview.";HomeEmptyGames.Visibility=Visibility.Visible;
         HomeSetupButton.Visibility=Visibility.Visible;HomeSetupButton.Tag="Graphics";HomeSetupButton.Content="Open Graphics";
         HomeRoutingStatus.Text=state.CheckState switch{GraphicsCheckState.Running or GraphicsCheckState.NotRun=>"Checking…",GraphicsCheckState.NoIntel or GraphicsCheckState.Failed=>"Waiting for graphics check",_=>state.Step2Result};
@@ -1245,7 +1254,7 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
     string? TurnOffBlockedReason(){
         if(graphicsWindowsState!=GraphicsWindowsState.On&&graphicsWindowsState!=GraphicsWindowsState.RestartRequired)return "Game-specific settings are already off.";
         if(!routingTurnOffAvailable)return "This setting was already on before Arc Cache turned it on, so Arc Cache leaves it as it is.";
-        if(gamesUsingCopies.Length>0){string names=gamesUsingCopies.Length<=3?string.Join(", ",gamesUsingCopies):string.Join(", ",gamesUsingCopies.Take(3))+$" and {gamesUsingCopies.Length-3} more";return $"Not possible yet: {names} still use{(gamesUsingCopies.Length==1?"s":"")} a driver copy, and turning this off would stop {(gamesUsingCopies.Length==1?"it":"them")} from loading it. Choose Use default settings for {(gamesUsingCopies.Length==1?"that game":"each of them")} in My games first.";}
+        if(gamesUsingCopies.Length>0){string names=gamesUsingCopies.Length<=3?string.Join(", ",gamesUsingCopies):string.Join(", ",gamesUsingCopies.Take(3))+$" and {gamesUsingCopies.Length-3} more";return $"Not yet: {names} still use{(gamesUsingCopies.Length==1?"s":"")} a driver copy. Choose Use default settings for {(gamesUsingCopies.Length==1?"it":"each")} in My games first.";}
         return null;
     }
     // Windows only lets an elevated process change this setting. The user approves the Windows prompt; nothing is elevated silently.
@@ -1259,8 +1268,8 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
     void RenderWindowsSetting(){
         bool on=graphicsWindowsState==GraphicsWindowsState.On,restart=graphicsWindowsState==GraphicsWindowsState.RestartRequired,known=graphicsWindowsState is GraphicsWindowsState.On or GraphicsWindowsState.Off or GraphicsWindowsState.RestartRequired;
         string? blocked=on?TurnOffBlockedReason():null;
-        string adminNote=isAdministrator?"":" Turning it off also needs administrator rights; Arc Cache asks Windows for them when you click it.";
-        string hint=blocked!=null?blocked+adminNote:isAdministrator?"Restart Windows after turning it off.":"Needs administrator rights: Arc Cache reopens as administrator after Windows asks for your approval. Restart Windows afterward.";
+        // A disabled button gets only the one-line reason; how turning it off works is said once it can be turned off.
+        string hint=blocked!=null?blocked:isAdministrator?"Restart Windows after turning it off.":"Needs administrator rights: Arc Cache reopens as administrator after Windows asks for your approval. Restart Windows afterward.";
         DisableRouteButton.Visibility=on&&!developerStatePreview?Visibility.Visible:Visibility.Collapsed;DisableRouteButton.IsEnabled=!busy&&blocked==null;
         DisableRouteReason.Text=vanguardInstalled?hint+" "+VanguardNote:hint;DisableRouteReason.Visibility=DisableRouteButton.Visibility;
         WindowsChangeLink.Content=windowsManageOpen?"Close":"Change";
@@ -1309,15 +1318,14 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
         ScsToolText.Text=scs?.CliPath==null?"No SCSKiller selected.":scsInfoChecking||scsInfo==null?"Checking which SCSKiller is selected…"
             :$"Using {scsInfo.Origin} · {scsInfo.Version} · "+(scsInfo.PrivateDriverSupport?"can use driver copies":"Default games only");
         ToolTipService.SetToolTip(ScsToolText,scsInfo?.Note);
-        ScsToolPath.Text=scs?.CliPath==null?"":"Program: "+scs.CliPath+(scsInfo==null?"":"\n"+scsInfo.Note);
-        if(ScsToolBlock() is {} block)ScsSummary.Text=block;
         var link=selected?.SupportedExecutable is string exe?cacheFiles?.For(exe):null;
-        long? now=link==null?null:CacheFileMap.CurrentBytes(link.File);
-        ScsCacheText.Visibility=link!=null?Visibility.Visible:Visibility.Collapsed;
-        if(link!=null)ScsCacheText.Text=now==null?$"This game's Intel cache file ({link.File[..8]}…) no longer exists.":$"This game's Intel cache file: {Size(now.Value)}"+(selectedReceipt?.MiB is int mib?$" of {SetupPresentation.Limit(mib)}":"")+$" · {link.File[..8]}… · linked {link.ObservedUtc.ToLocalTime():g}";
+        ScsToolPath.Text=(scs?.CliPath==null?"":"Program: "+scs.CliPath+(scsInfo==null?"":"\n"+scsInfo.Note))+(link==null?"":$"\nIntel cache file: {link.File} · linked {link.ObservedUtc.ToLocalTime():g} ({link.Source})");
+        if(ScsToolBlock() is {} block)ScsSummary.Text=block;
         ScsProgressPanel.Visibility=scsProgressGameKey!=null&&scsProgressGameKey==selected?.Key?Visibility.Visible:Visibility.Collapsed;
+        ScsDetails.Children.Clear();
+        if(selected?.Source=="Steam")RenderScsDetails(DetailsFor(selected));
     }
-    static string Size(long bytes)=>bytes>=1L<<30?(bytes/(double)(1L<<30)).ToString("0.00",System.Globalization.CultureInfo.CurrentCulture)+" GB":(bytes/(double)(1L<<20)).ToString("0",System.Globalization.CultureInfo.CurrentCulture)+" MB";
+    static string Size(long bytes)=>bytes>=1L<<30?(bytes/(double)(1L<<30)).ToString("0.00",System.Globalization.CultureInfo.InvariantCulture)+" GB":(bytes/(double)(1L<<20)).ToString("0",System.Globalization.CultureInfo.InvariantCulture)+" MB";
     void ShowScsOptions(){
         if(scs==null)return;scsOptionsLoading=true;
         try{
@@ -1333,7 +1341,35 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
     }
     void ScsThreadsChanged(object sender,SelectionChangedEventArgs e)=>SaveScsOptions();
     void ScsToggleChanged(object sender,RoutedEventArgs e)=>SaveScsOptions();
-    static string ScsStageText(string stage)=>stage switch{"Waiting"=>"Waiting","Indexing"=>"Reading the game's shaders","Planning"=>"Planning","Materializing"=>"Preparing the compile","Warming"=>"Compiling","Done"=>"Done","Failed"=>"Stopped",_=>stage};
+    // Title in bold, SCSKiller's reason under it, then a two-column table: labels muted on the left, values on the right.
+    void RenderScsDetails(ScsDetailView view){
+        var muted=(Style)Application.Current.Resources["Muted"];
+        ScsDetails.Children.Add(new TextBlock{Text=view.Title,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,TextWrapping=TextWrapping.Wrap});
+        if(view.Reason is not null)ScsDetails.Children.Add(new TextBlock{Text=view.Reason,TextWrapping=TextWrapping.Wrap,Style=muted});
+        var grid=new Grid{ColumnSpacing=16,RowSpacing=4,Margin=new Thickness(0,6,0,0)};
+        grid.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});grid.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1,GridUnitType.Star)});
+        for(int i=0;i<view.Rows.Count;i++){
+            grid.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});
+            var label=new TextBlock{Text=view.Rows[i].Label,Style=muted};Grid.SetRow(label,i);
+            var value=new TextBlock{Text=view.Rows[i].Value,TextWrapping=TextWrapping.Wrap,IsTextSelectionEnabled=true};Grid.SetRow(value,i);Grid.SetColumn(value,1);
+            grid.Children.Add(label);grid.Children.Add(value);
+        }
+        ScsDetails.Children.Add(grid);
+        if(view.Warning is not null)ScsDetails.Children.Add(new TextBlock{Text=view.Warning,TextWrapping=TextWrapping.Wrap,Foreground=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255,255,185,70)),Margin=new Thickness(0,4,0,0)});
+        if(view.Footer.Length>0)ScsDetails.Children.Add(new TextBlock{Text=view.Footer,FontSize=12,Style=muted,Margin=new Thickness(0,4,0,0)});
+    }
+    ScsDetailView DetailsFor(SteamGame game){
+        var link=game.SupportedExecutable is string exe?cacheFiles?.For(exe):null;
+        int mib=game.Key==selected?.Key?selectedReceipt?.MiB??512:512;
+        return ScsPresentation.DetailView(scsStatuses.GetValueOrDefault(game.Key),mib,link==null?null:CacheFileMap.CurrentBytes(link.File),link!=null);
+    }
+    IReadOnlyList<string> ScsDetailLines(SteamGame game)=>ScsPresentation.Lines(DetailsFor(game));
+    void RememberScsStatus(SteamGame game,IEnumerable<string> lines){
+        if(ScsPresentation.ParseStatus(lines,DateTime.UtcNow) is not {} status){Log("SCSKiller's status for "+game.Name+" could not be read; see the lines above.");return;}
+        scsStatuses[game.Key]=status;
+        Log($"SCSKiller status for {game.Name}: "+string.Join(" | ",ScsDetailLines(game)));
+        try{ScsPresentation.SaveStatuses(scsStatusPath!,scsStatuses);}catch(Exception e) when (e is IOException or UnauthorizedAccessException){Log("SCSKiller status could not be saved: "+e.Message);}
+    }
     PrivateDriverWarm? CreateScsPrivateWarm(){
         if(selected?.Source!="Steam"||selected.SupportedExecutable is not string exe||setupState?.Configured!=true||!setupState.ContentsValid||!recordValid||!receiptValid||selectedReceipt?.MiB is not >512||!ReceiptLoadVerified())return null;
         string? driver=selectedReceipt.Files.Keys.FirstOrDefault(n=>n.StartsWith("igd12um64xe",StringComparison.OrdinalIgnoreCase)&&n.EndsWith(".dll",StringComparison.OrdinalIgnoreCase));
@@ -1360,22 +1396,24 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
                 if(GameProcessRunning(game.SupportedExecutable))throw new InvalidOperationException("Close the selected game before compiling.");
             }
             scsCancellation=new CancellationTokenSource();ScsCancelButton.Visibility=Visibility.Visible;
-            var cacheBefore=action=="compile"?CacheFileMap.Snapshot():null;bool driverConfirmed=false;ScsKillerProgress? lastProgress=null;
-            scsProgressGameKey=game.Key;ScsProgress.IsIndeterminate=true;ScsProgressText.Text="Starting SCSKiller…";RenderScsTool();
-            void ShowProgress(){
-                string cache="";
-                if(cacheBefore!=null){var now=CacheFileMap.Snapshot();var grown=now.Select(p=>(p.Key,p.Value,Grew:p.Value-(cacheBefore.TryGetValue(p.Key,out long b)?b:0))).Where(x=>x.Grew>0).OrderByDescending(x=>x.Grew).FirstOrDefault();if(grown.Key!=null)cache=$" · cache file {Size(grown.Value)}"+(privateWarm!=null?$" of {SetupPresentation.Limit(privateWarm.CacheMiB)}":"");}
-                string stage=lastProgress==null?"Starting":ScsStageText(lastProgress.Stage);
-                bool counted=lastProgress is {Total:>0};ScsProgress.IsIndeterminate=!counted;if(counted)ScsProgress.Value=Math.Min(100,lastProgress!.Done*100.0/lastProgress.Total);
-                ScsProgressText.Text=(driverConfirmed?$"{SetupPresentation.Limit(privateWarm!.CacheMiB)} driver copy confirmed · ":"")+stage+(counted?$" {lastProgress!.Done:N0} / {lastProgress.Total:N0} pipelines":"")+cache;
+            var cacheBefore=action=="compile"?CacheFileMap.Snapshot():null;bool driverConfirmed=false;ScsKillerProgress? lastProgress=null;var watch=System.Diagnostics.Stopwatch.StartNew();
+            int cacheMiB=privateWarm?.CacheMiB??512;
+            void Show(ScsProgressView view){ScsProgress.IsIndeterminate=view.Percent==null;if(view.Percent is double pct)ScsProgress.Value=pct;ScsProgressText.Text=view.Headline;ScsProgressDetail.Text=view.Detail;ScsProgressDetail.Visibility=view.Detail.Length>0?Visibility.Visible:Visibility.Collapsed;}
+            string? CacheNow(){
+                if(cacheBefore==null)return null;
+                var grown=CacheFileMap.Snapshot().Select(p=>(p.Key,p.Value,Grew:p.Value-(cacheBefore.TryGetValue(p.Key,out long b)?b:0))).Where(x=>x.Grew>0).OrderByDescending(x=>x.Grew).FirstOrDefault();
+                return grown.Key==null?null:$"cache file {Size(grown.Value)} of {SetupPresentation.Limit(cacheMiB)}";
             }
+            string? Confirmed()=>driverConfirmed?$"{SetupPresentation.Limit(cacheMiB)} driver copy confirmed":null;
+            void ShowProgress()=>Show(ScsPresentation.Progress(action!="compile",lastProgress,watch.Elapsed,CacheNow(),Confirmed()));
+            scsProgressGameKey=game.Key;ShowProgress();RenderScsTool();
             var ticker=new DispatcherTimer{Interval=TimeSpan.FromSeconds(3)};ticker.Tick+=(_,_)=>ShowProgress();ticker.Start();
             try {
                 var logs=new System.Collections.Concurrent.ConcurrentQueue<string>();
                 int code=await scs.RunAsync(action,game.AppId,line=>{logs.Enqueue(line);var parsed=ScsKillerBridge.ParseProgress(line);bool marker=line.Contains("ARC_CACHE_DRIVER_LOADED|",StringComparison.Ordinal);DispatcherQueue.TryEnqueue(()=>{Log(line);if(parsed!=null)lastProgress=parsed;if(marker)driverConfirmed=true;if(parsed!=null||marker)ShowProgress();});},scsCancellation.Token,privateWarm);
                 if(code!=0)throw new InvalidOperationException($"SCSKiller exited with code {code}. See Activity for its reason; no private-driver files were changed.");
                 if(privateWarm!=null&&!ScsKillerBridge.HasVerifiedPrivateDriverEvidence(logs,privateWarm))throw new InvalidOperationException("SCSKiller finished but did not confirm loading the selected game's private Intel driver copy. Do not treat this warm as verified; see Activity for details.");
-                Log(privateWarm==null?"SCSKiller completed with the normal Intel driver and Default cache size.":$"SCSKiller confirmed the {SetupPresentation.Limit(privateWarm.CacheMiB)} private driver copy loaded in its temporary compile process. Cache capacity is not measured.");
+                if(action=="compile")Log(privateWarm==null?"SCSKiller completed with the normal Intel driver and Default cache size.":$"SCSKiller confirmed the {SetupPresentation.Limit(privateWarm.CacheMiB)} private driver copy loaded in its temporary compile process. Cache capacity is not measured.");
                 if(cacheBefore!=null&&game.SupportedExecutable is string exe&&action=="compile"){
                     var after=CacheFileMap.Snapshot();
                     // A compile also fills the game's separate D3D11 cache file, so its size can't overrule a link that
@@ -1384,9 +1422,19 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
                     else if(CacheFileMap.Attribute(cacheBefore,after) is string file&&cacheFiles!=null){var link=cacheFiles.Remember(exe,file,after[file],"SCSKiller compile");Log($"Linked {game.Name} to Intel cache file {file[..8]}… ({Size(link.Bytes)}).");}
                     else Log("Arc Cache couldn't tell which Intel cache file belongs to this game (no single file clearly grew).");
                 }
-                ShowProgress();ScsProgress.IsIndeterminate=false;ScsProgress.Value=100;ScsProgressText.Text="Done · "+ScsProgressText.Text.Replace("Compiling","compiled");
+                watch.Stop();
+                if(action=="status"){RememberScsStatus(game,logs);scsProgressGameKey=null;}
+                else{
+                    // The compile changed what status reports (last prepared, cache on disk): read it again, without a second prompt.
+                    ScsProgressText.Text="Reading the result…";ScsProgress.IsIndeterminate=true;
+                    var statusLogs=new System.Collections.Concurrent.ConcurrentQueue<string>();
+                    try{if(await scs.RunAsync("status",game.AppId,statusLogs.Enqueue,scsCancellation.Token)==0)RememberScsStatus(game,statusLogs);}
+                    catch(Exception e) when (e is not OperationCanceledException){Log("SCSKiller's result could not be read: "+e.Message);}
+                }
+                Show(ScsPresentation.Progress(action!="compile",lastProgress,watch.Elapsed,CacheNow(),Confirmed(),done:true));
                 FooterStatus.Text="Complete · "+label.TrimEnd('…');
-            }catch{scsProgressGameKey=null;throw;}
+            }catch(OperationCanceledException){watch.Stop();Show(ScsPresentation.Progress(action!="compile",lastProgress,watch.Elapsed,CacheNow(),null,stopped:true));throw;}
+            catch{scsProgressGameKey=null;throw;}
             finally{ticker.Stop();ScsCancelButton.Visibility=Visibility.Collapsed;scsCancellation.Dispose();scsCancellation=null;RenderScsTool();}
         }catch(Exception e){
             bool stopped=e is OperationCanceledException;diagnostics?.Write("action-error",new{Action=label,Error=e.ToString()});

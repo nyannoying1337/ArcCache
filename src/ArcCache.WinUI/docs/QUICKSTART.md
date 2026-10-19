@@ -26,7 +26,7 @@ After a driver update, Arc Cache detects the changed active package while open. 
 
 ## SCSKiller and monitoring
 
-**Prepare shaders with SCSKiller** compiles a game's shaders before you play. The Arc Cache download includes a matching SCSKiller build (`SCSKiller\cli\scskiller.exe`); Settings or **Change** on the card can select another one. The card always shows which SCSKiller is used and whether it can use driver copies.
+**Prepare shaders with SCSKiller** compiles a game's shaders before you play. The Arc Cache download includes a matching SCSKiller build (`SCSKiller\cli\scskiller.exe`); Settings or **Change** on the card can select another one. The card always shows which SCSKiller is used and whether it can use driver copies. **Check available shaders** fills in the card: how many pipelines a compile creates, the expected cache size and time (with a note when that is more than the game's cache size), the last preparation and the last play. While preparing, the card shows the step (1 to 4), percent, pipelines done, rate, time left, failures and the cache file's size.
 
 For a game with a bigger size, the compile runs with that game's verified driver copy. SCSKiller checks before and after opening the GPU that the copy (by path and SHA-256) is what Windows loaded, and compiles nothing otherwise. Official SCSKiller releases (also portable/beta) can't do this, so Arc Cache blocks them for bigger sizes: they would trim the cache back to 512 MB. Don't compile Arc Cache games from the SCSKiller app itself for the same reason. Details: [SCSKiller guide](../../../docs/SCSKILLER.md).
 

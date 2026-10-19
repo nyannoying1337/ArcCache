@@ -61,7 +61,7 @@ public sealed record GraphicsPageState(
         _ => "Good to go"
     };
 
-    public string HomeHeader => ShowFinish ? "Good to go" : "Home";
+    public string HomeHeader => "Home"; // page titles match nav labels
 
     public string AccentButton => PrimaryAction switch
     {

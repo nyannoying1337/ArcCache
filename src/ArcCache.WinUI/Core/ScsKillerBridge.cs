@@ -10,8 +10,9 @@ public sealed record PrivateDriverWarm(string GameExecutable,string DriverDirect
 public sealed record ScsKillerInfo(string CliPath,string Version,string Origin,bool PrivateDriverSupport,string Note);
 /// <summary>Compile options. Threads 0 = SCSKiller's choice. Background = --idle (lower priority).</summary>
 public sealed record ScsKillerOptions(int Threads=0,bool Background=false,bool Community=true);
-/// <summary>One progress line of the CLI ("20:19:35 steam:1623730 Warming 1200/94165 ..."): stage, done, total (0 = none).</summary>
-public sealed record ScsKillerProgress(string Stage,long Done,long Total,string Detail);
+/// <summary>One progress line of the CLI ("20:19:35 steam:1623730 Warming 1200/94165 (3 failed, 2 skipped: not in this install)
+/// 450/s - note"): stage, done, total (0 = none), and from the rest the failed and skipped counts, rate and SCSKiller's note.</summary>
+public sealed record ScsKillerProgress(string Stage,long Done,long Total,string Detail,long Failed=0,long Skipped=0,double PerSecond=0,string? Note=null);
 
 public sealed class ScsKillerBridge(string settingsPath) {
     public string? CliPath {get;private set;}
@@ -71,11 +72,15 @@ public sealed class ScsKillerBridge(string settingsPath) {
         return false;
     }
     static readonly System.Text.RegularExpressions.Regex ProgressLine=new(@"^\d{2}:\d{2}:\d{2} \S+:\S+ (?<stage>[A-Za-z]+)(?: (?<done>\d+)/(?<total>\d+))?(?<rest>.*)$",System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    static readonly System.Text.RegularExpressions.Regex ProgressCounts=new(@"^\((?<failed>\d+) failed(?:, (?<skipped>\d+) skipped[^)]*)?\) (?<rate>\d+)/s(?: - (?<note>.+))?$",System.Text.RegularExpressions.RegexOptions.CultureInvariant);
     public static ScsKillerProgress? ParseProgress(string line) {
         if(line.StartsWith("SCSKiller: ",StringComparison.Ordinal))line=line["SCSKiller: ".Length..];
         var m=ProgressLine.Match(line);if(!m.Success)return null;
         long done=m.Groups["done"].Success?long.Parse(m.Groups["done"].Value,System.Globalization.CultureInfo.InvariantCulture):0,total=m.Groups["total"].Success?long.Parse(m.Groups["total"].Value,System.Globalization.CultureInfo.InvariantCulture):0;
-        return new(m.Groups["stage"].Value,done,total,m.Groups["rest"].Value.Trim());
+        string rest=m.Groups["rest"].Value.Trim();var counts=ProgressCounts.Match(rest);
+        if(!counts.Success)return new(m.Groups["stage"].Value,done,total,rest,Note:rest.StartsWith("- ",StringComparison.Ordinal)?rest[2..]:null);
+        long Count(string group)=>counts.Groups[group].Success?long.Parse(counts.Groups[group].Value,System.Globalization.CultureInfo.InvariantCulture):0;
+        return new(m.Groups["stage"].Value,done,total,rest,Count("failed"),Count("skipped"),Count("rate"),counts.Groups["note"].Success?counts.Groups["note"].Value:null);
     }
     /// <summary>Which SCSKiller this is: the CLI's arc-cache-info line (Arc Cache's build) or, for any other build, its file version.</summary>
     public async Task<ScsKillerInfo> InspectAsync(CancellationToken cancel) {
