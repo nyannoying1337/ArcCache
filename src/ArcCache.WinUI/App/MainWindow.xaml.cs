@@ -99,7 +99,7 @@ public partial class MainWindow : Window {
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1320,940));
         Nav.SelectedItem=HomeNav;
 #endif
-        AppWindow.Closing+=(_,e)=>{if(busy)e.Cancel=true;else if(scsRunning&&!closeAfterScs){e.Cancel=true;DispatcherQueue.TryEnqueue(async()=>await CloseDuringScs());}else{closing=true;graphicsStatsTimer.Stop();discoveryTimer.Stop();driverWatchTimer.Stop();footerStatusTimer.Stop();StopCacheMonitor();}};
+        AppWindow.Closing+=(_,e)=>{if(busy)e.Cancel=true;else if(scsRunning&&!closeAfterScs){e.Cancel=true;DispatcherQueue.TryEnqueue(async()=>await CloseDuringScs());}else{closing=true;graphicsStatsTimer.Stop();discoveryTimer.Stop();driverWatchTimer.Stop();footerStatusTimer.Stop();overlayWatchTimer.Stop();StopCacheMonitor();}};
 #if DEBUG
         if(stateArg is not null){Root.Loaded+=(_,_)=>{if(developerMyGamesPreview){string key=stateArg["--preview-state=".Length..];var row=MyGamesPageStates.StateTable.First(r=>r.Key==key);LoadMyGamesPreview(row.Input,row.Key);}else if(developerSizePreview)LoadSizePickerPreview(developerSizePreviewKey!);else LoadDeveloperStatePreview(statePreviewInput!,stateArg["--preview-state=".Length..]);};return;}
 #endif
@@ -112,6 +112,7 @@ public partial class MainWindow : Window {
         discoveryTimer.Tick+=async (_,_)=>await PollGame();
         try{scs=new ScsKillerBridge(Path.Combine(store.Root,"scskiller-bridge.json")).Load();string bundled=Path.Combine(AppContext.BaseDirectory,"SCSKiller","cli","scskiller.exe");if(scs.CliPath==null&&File.Exists(bundled))scs.SelectCli(bundled);ScsPath.Text=scs.CliPath??"Choose the SCSKiller command-line program (scskiller.exe).";}catch(Exception e){Log("SCSKiller configuration could not be read: "+e.Message);scs=new ScsKillerBridge(Path.Combine(store.Root,"scskiller-bridge.json"));}
         scsStatusPath=Path.Combine(store.Root,"scskiller-status.json");scsStatuses=ScsPresentation.LoadStatuses(scsStatusPath);
+        overlayWatchTimer.Tick+=async (_,_)=>await WatchForGames();LoadOverlaySettings();
         cacheFiles=new CacheFileMap(Path.Combine(store.Root,"cache-files.json"));sightings=new AntiCheatSightings(Path.Combine(store.Root,"anticheat-sightings.json"));hintCache=new AntiCheatHintCache(Path.Combine(store.Root,"anticheat-hints.json"));overrides=new AntiCheatOverrides(Path.Combine(store.Root,"anticheat-overrides.json"));ShowScsOptions();DispatcherQueue.TryEnqueue(async()=>await RefreshScsInfo());
     }
 #if DEBUG
@@ -565,6 +566,7 @@ public partial class MainWindow : Window {
     string LaunchThroughLabel()=>selected is null?"Launch game":selected.Source=="Manual"?"Start game":"Launch through "+selected.Source;
     static string CacheLabel(int mib)=>mib<=512?"Default":SetupPresentation.Limit(mib);
     void RenderMyGames(){
+        RenderMonitorButton();
         if(GameStep1==null||LibraryPanel.Visibility!=Visibility.Visible)return;
         MyGamesPageInputs input;
         if(developerMyGamesPreview&&myGamesPreviewInput is not null) input=myGamesPreviewInput;
@@ -1164,23 +1166,73 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
             RenderMyGames();
         });
     }
+    // On-screen stats: one overlay at a time, for monitorGameKey. Hiding it while its game runs keeps auto-start from
+    // reopening it until that game closes (overlaySuppressedKey).
+    string? monitorGameKey,overlaySuppressedKey;OverlaySettings overlaySettings=new();string overlaySettingsPath="";bool overlaySettingsLoading;
+    readonly DispatcherTimer overlayWatchTimer=new(){Interval=TimeSpan.FromSeconds(5)};
+    bool MonitorRunning=>cacheMonitor is {HasExited:false};
     void StopCacheMonitor() {
         if(cacheMonitor!=null){if(!cacheMonitor.HasExited)cacheMonitor.Kill();cacheMonitor.Dispose();cacheMonitor=null;}
-        MonitorButton.Content="Show on-screen stats";
+        monitorGameKey=null;RenderMonitorButton();
+    }
+    void RenderMonitorButton()=>MonitorButton.Content=MonitorRunning&&monitorGameKey==selected?.Key?"Hide on-screen stats":"Show on-screen stats";
+    async Task StartCacheMonitor(SteamGame game,int mib){
+        string exe=game.SupportedExecutable??throw new InvalidOperationException("Launch this game in DirectX 12 first so Arc Cache can find its game files.");
+        StopCacheMonitor();var info=new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory,"ArcCache.SafetyEngine.exe")){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
+        var link=cacheFiles?.For(exe);
+        foreach(string arg in new[]{"--cache-monitor",exe,mib.ToString(System.Globalization.CultureInfo.InvariantCulture),link?.File??"-",
+            (scsStatuses.GetValueOrDefault(game.Key)?.EstimateBytes??0).ToString(System.Globalization.CultureInfo.InvariantCulture),new string(game.Name.Where(c=>!char.IsControl(c)).Take(200).ToArray()),overlaySettings.Corner})info.ArgumentList.Add(arg);
+        cacheMonitor=Process.Start(info)??throw new IOException("The cache monitor could not start.");monitorGameKey=game.Key;
+        await Task.Delay(1000);
+        if(cacheMonitor.HasExited){string result=await cacheMonitor.StandardOutput.ReadToEndAsync();StopCacheMonitor();throw new IOException("Monitor could not start: "+result);}
+        RenderMonitorButton();
+        Log(link is {} shown?$"On-screen stats started for {game.Name}: its linked Intel cache file ({shown.File[..8]}…). Borderless or windowed display required; CSV saved under Activity logs.":$"On-screen stats started for {game.Name}: its cache file isn't linked yet, so the overlay shows the file that grows most. Prepare shaders once to link it. Borderless or windowed display required; CSV saved under Activity logs.");
     }
     async void ToggleCacheMonitor(object sender,RoutedEventArgs e) {
-        if(cacheMonitor!=null&&!cacheMonitor.HasExited){StopCacheMonitor();Log("Cache monitor stopped.");return;}
+        if(MonitorRunning&&monitorGameKey==selected?.Key){if(GameProcessRunning(selected?.SupportedExecutable))overlaySuppressedKey=selected?.Key;StopCacheMonitor();Log("On-screen stats hidden.");return;}
         if(selected?.Supported!=true){GlobalNotice.Title="Start this game first";GlobalNotice.Message="Launch this game in DirectX 12 first so Arc Cache can find its game files.";GlobalNotice.IsOpen=true;return;}
-        string exe=selected.SupportedExecutable!;
-        await Run("Opening on-screen stats…",async()=>{
-            StopCacheMonitor();var info=new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory,"ArcCache.SafetyEngine.exe")){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
-            info.ArgumentList.Add("--cache-monitor");info.ArgumentList.Add(exe);info.ArgumentList.Add((selectedReceipt?.MiB??512).ToString(System.Globalization.CultureInfo.InvariantCulture));info.ArgumentList.Add(cacheFiles?.For(exe) is {} cacheLink?cacheLink.File:"-");
-            info.ArgumentList.Add((scsStatuses.GetValueOrDefault(selected.Key)?.EstimateBytes??0).ToString(System.Globalization.CultureInfo.InvariantCulture));info.ArgumentList.Add(new string(selected.Name.Where(c=>!char.IsControl(c)).Take(200).ToArray()));cacheMonitor=Process.Start(info)??throw new IOException("The cache monitor could not start.");
-            await Task.Delay(1000);
-            if(cacheMonitor.HasExited){string result=await cacheMonitor.StandardOutput.ReadToEndAsync();StopCacheMonitor();throw new IOException("Monitor could not start: "+result);}
-            MonitorButton.Content="Hide on-screen stats";Log(cacheFiles?.For(exe) is {} shown?$"Overlay started: shows this game's linked Intel cache file ({shown.File[..8]}…) and the whole Intel folder. Borderless/windowed display required; CSV saved under Activity logs.":"Overlay started: this game's cache file isn't linked yet, so the overlay shows the file that grows most while you play. Prepare shaders once to link it. Borderless/windowed display required; CSV saved under Activity logs.");
-        });
+        var game=selected;int mib=selectedReceipt?.MiB??512;overlaySuppressedKey=null;
+        await Run("Opening on-screen stats…",()=>StartCacheMonitor(game,mib));
     }
+    // Auto-start: every 5 s, the first running set-up game gets the overlay. Only reads process names and setup records.
+    async Task WatchForGames(){
+        if(!overlaySettings.AutoStart||closing||busy||MonitorRunning)return;
+        if(cacheMonitor!=null)StopCacheMonitor(); // its game closed
+        foreach(var game in games){
+            if(game.SupportedExecutable is not string exe||!File.Exists(store.Receipt(game)))continue;
+            if(GameSummary(game).Badge is not ("Ready" or "Set up"))continue;
+            if(!GameProcessRunning(exe)){if(overlaySuppressedKey==game.Key)overlaySuppressedKey=null;continue;}
+            if(overlaySuppressedKey==game.Key)continue;
+            try{await StartCacheMonitor(game,ReceiptMiB(game));}catch(Exception e){overlaySuppressedKey=game.Key;Log("On-screen stats could not start for "+game.Name+": "+e.Message);}
+            return;
+        }
+    }
+    int ReceiptMiB(SteamGame game){
+        try{using var doc=JsonDocument.Parse(File.ReadAllText(store.Receipt(game)));return doc.RootElement.TryGetProperty("MiB",out var m)&&m.TryGetInt32(out int v)?v:512;}
+        catch(Exception e) when (e is JsonException or IOException or UnauthorizedAccessException){return 512;}
+    }
+    void LoadOverlaySettings(){
+        overlaySettingsPath=Path.Combine(store.Root,"overlay-settings.json");overlaySettings=OverlaySettings.Load(overlaySettingsPath);
+        overlaySettingsLoading=true;
+        try{
+            OverlayAutoStart.IsOn=overlaySettings.AutoStart;OverlayCorner.Items.Clear();
+            foreach(var (tag,label) in OverlaySettings.Corners)OverlayCorner.Items.Add(new ComboBoxItem{Content=label,Tag=tag});
+            OverlayCorner.SelectedItem=OverlayCorner.Items.OfType<ComboBoxItem>().First(i=>(string)i.Tag==overlaySettings.Corner);
+        }finally{overlaySettingsLoading=false;}
+        if(overlaySettings.AutoStart)overlayWatchTimer.Start();
+    }
+    async void OverlaySettingChanged(object sender,RoutedEventArgs e){
+        if(overlaySettingsLoading)return;
+        string corner=OverlayCorner.SelectedItem is ComboBoxItem {Tag:string tag}?tag:"top-right";bool moved=corner!=overlaySettings.Corner;
+        overlaySettings=new(OverlayAutoStart.IsOn,corner);
+        try{overlaySettings.Save(overlaySettingsPath);}catch(Exception error) when (error is IOException or UnauthorizedAccessException){Log("On-screen stats setting could not be saved: "+error.Message);}
+        if(overlaySettings.AutoStart)overlayWatchTimer.Start();else overlayWatchTimer.Stop();
+        // The overlay reads its corner when it starts: reopen a running one in the new place.
+        if(moved&&MonitorRunning&&games.FirstOrDefault(g=>g.Key==monitorGameKey) is {} shown){try{await StartCacheMonitor(shown,ReceiptMiB(shown));}catch(Exception error){Log("On-screen stats could not move: "+error.Message);}}
+        else if(overlaySettings.AutoStart)await WatchForGames();
+        FooterStatus.Text=moved?"On-screen stats: "+OverlaySettings.Corners.First(c=>c.Tag==corner).Label.ToLowerInvariant():overlaySettings.AutoStart?"On-screen stats open when a set-up game starts":"On-screen stats open only from a game's page";footerStatusTimer.Stop();footerStatusTimer.Start();
+    }
+    void OverlayCornerChanged(object sender,SelectionChangedEventArgs e)=>OverlaySettingChanged(sender,new RoutedEventArgs());
     async void LaunchGame(object sender,RoutedEventArgs e) {
         if(PreviewOnlyFeedback()||ScsBlocks("start the game"))return;
         if(selected==null)return;SteamGame game=selected;string id=game.Key;

@@ -41,7 +41,7 @@ class CacheSnapshot {
 // Under it: the cache file bar (share of the game's cache size, a tick at SCSKiller's expected size) and one footer line.
 enum OverlayTone {Wait,Good,Warn,Info}
 class CacheMonitor : Form {
-    readonly string executable,root,log,displayName;readonly CacheSnapshot initial;readonly Timer timer=new Timer();int gamePid;DateTime started;int sampleCount;string driverStatus="Driver: not checked";string observedModulePath;readonly Func<string,string> inspectDriver;readonly string cacheFile;readonly long limitBytes,expectedBytes;readonly int limitMiB;readonly DateTime monitorStarted=DateTime.Now;
+    readonly string executable,root,log,displayName;readonly CacheSnapshot initial;readonly Timer timer=new Timer();int gamePid;DateTime started;int sampleCount;string driverStatus="Driver: not checked";string observedModulePath;readonly Func<string,string> inspectDriver;readonly string cacheFile;readonly long limitBytes,expectedBytes;readonly int limitMiB;readonly string corner;readonly DateTime monitorStarted=DateTime.Now;
     // The last sample, drawn by OnPaint. The status also goes to the window title for screen readers.
     OverlayTone tone=OverlayTone.Wait;string status="Checking the driver…",fileSize,growthText,footer="";long fileBytes=-1;bool loggingFailed;float scale=1;
     struct Rect {public int Left,Top,Right,Bottom;}
@@ -60,7 +60,9 @@ class CacheMonitor : Form {
     // cacheFile: this game's Intel cache file when Arc Cache has linked it (64 hex), else null: then the file that grew the
     // most since the overlay started is shown as the likely one. limitMiB: the game's cache size from its setup record.
     // expected: SCSKiller's estimated cache size from the game's last check (0 = none). name: the game's name for the header.
-    public CacheMonitor(string exe,Func<string,string> inspect=null,string cacheRoot=null,string logFolder=null,string linkedCacheFile=null,int limitMiB=512,long expected=0,string name=null) {
+    // place: the game window's corner (top-right, top-left, bottom-right, bottom-left); click-through, so it isn't dragged.
+    public CacheMonitor(string exe,Func<string,string> inspect=null,string cacheRoot=null,string logFolder=null,string linkedCacheFile=null,int limitMiB=512,long expected=0,string name=null,string place="top-right") {
+        corner=place=="top-left"||place=="bottom-right"||place=="bottom-left"?place:"top-right";
         inspectDriver=inspect;cacheFile=linkedCacheFile!=null&&linkedCacheFile.Length==64&&System.Text.RegularExpressions.Regex.IsMatch(linkedCacheFile,"^[0-9A-Fa-f]{64}$")?linkedCacheFile:null;this.limitMiB=Math.Max(512,limitMiB);limitBytes=(long)this.limitMiB<<20;expectedBytes=Math.Max(0,expected);
         executable=Path.GetFullPath(exe);root=cacheRoot??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),"AppData","LocalLow","Intel","ShaderCache");
         displayName=string.IsNullOrWhiteSpace(name)?Path.GetFileNameWithoutExtension(executable):name.Trim();
@@ -166,13 +168,20 @@ class CacheMonitor : Form {
         }
         detectedFile=found;
     }
+    // Below the title bar at the top (windowed games have one), above the bottom edge otherwise; never left of the window.
+    Point Place(Rect game){
+        bool left=corner.EndsWith("left",StringComparison.Ordinal),top=corner.StartsWith("top",StringComparison.Ordinal);
+        int x=left?game.Left+S(18):Math.Max(game.Left,game.Right-Width-S(18));
+        int y=top?game.Top+S(42):Math.Max(game.Top,game.Bottom-Height-S(18));
+        return new Point(x,y);
+    }
     void Sample() {
         long privateBytes=0,workingSet=0;
         try{using(var p=Process.GetProcessById(gamePid)){if(p.HasExited||p.StartTime!=started){Close();return;}privateBytes=p.PrivateMemorySize64;workingSet=p.WorkingSet64;
             if(sampleCount++%5==0){bool found=false;try{foreach(ProcessModule m in p.Modules)if((m.ModuleName.Equals("igd12um64xe2.dll",StringComparison.OrdinalIgnoreCase)||m.ModuleName.Equals("igd12um64xe3.dll",StringComparison.OrdinalIgnoreCase)||m.ModuleName.Equals("igd12um64xeh.dll",StringComparison.OrdinalIgnoreCase))){found=true;string path=m.FileName;if(path==observedModulePath)break;observedModulePath=path;driverStatus=path.StartsWith(executable+".local\\",StringComparison.OrdinalIgnoreCase)?"Game setup: custom copy loaded":"Game setup: normal or other copy loaded";if(inspectDriver!=null){try{driverStatus+=" · "+inspectDriver(path);}catch{driverStatus+=" · size not checked";}}break;}if(!found){driverStatus="Game setup: not confirmed";observedModulePath=null;}}catch{driverStatus="Game setup: could not be checked";observedModulePath=null;}}
         }}catch{Close();return;}
         IntPtr front=GetForegroundWindow();uint foregroundPid;GetWindowThreadProcessId(front,out foregroundPid);Rect rect;
-        if(foregroundPid==gamePid&&GetWindowRect(front,out rect)){Location=new Point(Math.Max(rect.Left,rect.Right-Width-18),rect.Top+42);if(!Visible)Show();}else if(Visible)Hide();
+        if(foregroundPid==gamePid&&GetWindowRect(front,out rect)){Location=Place(rect);if(!Visible)Show();}else if(Visible)Hide();
         var now=CacheSnapshot.Read(root);long growth=now.Bytes-initial.Bytes;int changed=now.ChangedSince(initial);
         if(sampleCount%5==1)try{DetectOpenFile(now);}catch(Exception){}
         string name=CacheName(now);long size;

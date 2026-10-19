@@ -294,6 +294,15 @@ Test("SCSKiller card reads shader counts, estimates and progress from one model"
     Check(finished.Headline.StartsWith("Done · 1,200 compile jobs")&&finished.Detail.Split("failed").Length==2,"Done must not repeat the failed count: "+finished.Detail);
     Check(ScsPresentation.ParseStatus(["error: no game matches 'steam:1'"],DateTime.UtcNow)==null,"An error was read as a status.");
 });
+Test("On-screen stats settings keep auto-start and a known corner",()=>{
+    string path=Path.Combine(Path.GetTempPath(),"ArcOverlay-"+Guid.NewGuid().ToString("N")+".json");
+    try{
+        Check(OverlaySettings.Load(path)==new OverlaySettings(),"Missing settings must default to off, top right.");
+        new OverlaySettings(true,"bottom-left").Save(path);Check(OverlaySettings.Load(path)==new OverlaySettings(true,"bottom-left"),"Settings were not kept.");
+        File.WriteAllText(path,"{\"AutoStart\":true,\"Corner\":\"middle\"}");Check(OverlaySettings.Load(path)==new OverlaySettings(true,"top-right"),"An unknown corner must fall back to top right.");
+        bool rejected=false;try{new OverlaySettings(false,"center").Save(path);}catch(ArgumentException){rejected=true;}Check(rejected,"An unknown corner was saved.");
+    }finally{File.Delete(path);}
+});
 Test("Old session logs and overlay CSVs are pruned, nothing else",()=>{
     string root=Path.Combine(Path.GetTempPath(),"ArcLogs-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
     try{
