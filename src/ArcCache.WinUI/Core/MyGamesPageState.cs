@@ -1,7 +1,7 @@
-namespace ArcCache.Core;
+﻿namespace ArcCache.Core;
 
 public enum MyGamesLoadResult { Unknown, Checking, DriverCopyLoaded, NormalDriverLoaded, Failed }
-public enum MyGamesAction { None, AddGame, ChooseGame, ChooseAnotherGame, OpenGraphics, OpenGameFolder, LaunchForDiscovery, SetUp, Launch, LaunchAgain, ApplySize, RestoreGame, ReviewSetup, ReviewSavedSetup }
+public enum MyGamesAction { None, AddGame, ChooseGame, ChooseAnotherGame, OpenGraphics, OpenGameFolder, UpdateRecorder, LaunchForDiscovery, SetUp, Launch, LaunchAgain, ApplySize, RestoreGame, ReviewSetup, ReviewSavedSetup }
 
 public sealed record LocalModBlocker(string Path, bool IsDirectory = false, string? ProductName = null, string? FileDescription = null, string? CompanyName = null) {
     public string DisplayName { get { string value=string.Join(" · ",new[]{ProductName,FileDescription,CompanyName}.Where(s=>!string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase));return value.Length>0?value:IsDirectory?"an existing .local folder":"an existing mod"; } }
@@ -30,6 +30,7 @@ public sealed record MyGamesPageInputs(
     string? DiscoveryMessage = null,
     bool SizeVerified = false,
     LocalModBlocker? ModBlocker = null,
+    bool RecorderUpdate = false,
     bool RequiresTrialProfile = false,
     bool TrialProfileFound = true,
     AntiCheatSighting? AntiCheatSeen = null,
@@ -75,6 +76,7 @@ public static class MyGamesPageStates {
         MyGamesAction.ReviewSetup => "Review setup",
         MyGamesAction.ReviewSavedSetup => "Review saved setup",
         MyGamesAction.OpenGameFolder => "Open game folder",
+        MyGamesAction.UpdateRecorder => "Use Arc Cache's recorder",
         _ => string.Empty
     };
 
@@ -85,6 +87,9 @@ public static class MyGamesPageStates {
             return Make(i,"no-selection","Choose a game","",false,false,true,false,"","",false,"","",false,"","",false,0,false,false,false,false,false,false,"",MyGamesAction.None);
         if (!i.GameInstalled)
             return Make(i,"game-uninstalled","Game not found","Not installed",false,false,false,false,"","",false,"","",false,"","",false,0,false,false,false,false,false,false,"",MyGamesAction.ReviewSavedSetup,"The game is no longer installed. Its saved setup can still be reviewed or removed.");
+        // SCSKiller's recorder from a build that can't run beside a driver copy, when the selected SCSKiller has one that can.
+        if (i.ModBlocker is { } old && i.RecorderUpdate)
+            return Make(i,"blocked-by-old-recorder","Blocked by an older recorder","Blocked",false,false,false,false,"","",false,"","",false,"","",false,0,false,false,false,false,false,false,"",MyGamesAction.UpdateRecorder,$"Found {old.DisplayName}. This version can't run beside a driver copy: the game wouldn't start. Arc Cache's SCSKiller has one that can.\nFile: {old.Path}");
         if (i.ModBlocker is { } blocker)
             return Make(i,"blocked-by-another-mod","Blocked by another mod","Blocked",false,false,false,false,"","",false,"","",false,"","",false,0,false,false,false,false,false,false,"",MyGamesAction.OpenGameFolder,$"Found {blocker.DisplayName}. A mod such as OptiScaler or ReShade also hooks into DirectX, and combining both can crash the game.\nFile: {blocker.Path}\nRemove or disable the mod, then check again.");
         // An anti-cheat that runs next to the game sees the changed driver file, whatever mode the game is in.

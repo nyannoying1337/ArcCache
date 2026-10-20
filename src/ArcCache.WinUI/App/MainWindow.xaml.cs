@@ -597,6 +597,7 @@ public partial class MainWindow : Window {
                 AppliedDefault:selectedReceipt?.MiB is null or <=512,ChosenDefault:chosen<=512,
                 LoadResult:EffectiveLoadResult(),LaunchLabel:LaunchThroughLabel(),CacheSize:CacheLabel(chosen),AvailableSizes:CacheSizesForGame(),AppliedChoiceMatches:selectedReceipt?.MiB==chosen,TrialNeedsRetest:setupState?.TrialNeedsRetest==true,DiscoveryMessage:discoveryMessage,SizeVerified:setupState?.Configured==true&&selectedReceipt?.MiB>512&&selectedReceipt.Status=="size-loading-verified",
                 ModBlocker:selected?.Key==activeModBlockerGameKey?activeModBlocker:null,
+                RecorderUpdate:selected?.Key==activeModBlockerGameKey&&activeModBlocker is {IsDirectory:false} blockingDll&&ScsKillerBridge.IsRecorder(blockingDll.Path)&&ScsKillerBridge.IsDotLocalAware(scs?.RecorderSource()),
                 RequiresTrialProfile:TrialMode,TrialProfileFound:selected?.TrialProfileReady==true,
                 AntiCheatSeen:selected is null?null:sightings?.Get(selected.Key),
                 AntiCheatFiles:selected is not null&&antiCheatHints.TryGetValue(selected.Key,out var acFiles)&&acFiles.AlwaysOn?acFiles:null,
@@ -706,7 +707,7 @@ public partial class MainWindow : Window {
     void ChangeGameStep3(object sender,RoutedEventArgs e){if(PreviewOnlyFeedback())return;myGamesChangeStep=3;RenderMyGames();}
     void LibraryMessageAction(object sender,RoutedEventArgs e){
         if(PreviewOnlyFeedback())return;
-        switch(myGamesPageState?.AccentAction){case MyGamesAction.AddGame:AddManualGame(sender,e);break;case MyGamesAction.OpenGraphics:OpenGraphics(sender,e);break;case MyGamesAction.OpenGameFolder:OpenSelectedGameFolder();break;case MyGamesAction.LaunchForDiscovery:LaunchGame(sender,e);break;case MyGamesAction.RestoreGame:RestoreGame(sender,e);break;case MyGamesAction.ChooseAnotherGame:GamesList.Focus(FocusState.Programmatic);break;case MyGamesAction.ReviewSetup:case MyGamesAction.ReviewSavedSetup:MyGamesAdvanced.IsExpanded=true;break;}
+        switch(myGamesPageState?.AccentAction){case MyGamesAction.AddGame:AddManualGame(sender,e);break;case MyGamesAction.OpenGraphics:OpenGraphics(sender,e);break;case MyGamesAction.OpenGameFolder:OpenSelectedGameFolder();break;case MyGamesAction.UpdateRecorder:UpdateBlockingRecorder();break;case MyGamesAction.LaunchForDiscovery:LaunchGame(sender,e);break;case MyGamesAction.RestoreGame:RestoreGame(sender,e);break;case MyGamesAction.ChooseAnotherGame:GamesList.Focus(FocusState.Programmatic);break;case MyGamesAction.ReviewSetup:case MyGamesAction.ReviewSavedSetup:MyGamesAdvanced.IsExpanded=true;break;}
     }
     void OpenSelectedGameFolder(){if(selected is null)return;try{Process.Start(new ProcessStartInfo("explorer.exe"){UseShellExecute=true,ArgumentList={selected.InstallDirectory}});}catch(Exception e){Log("Could not open game folder: "+e.Message);}}
     async void RecheckBlockedGame(object sender,RoutedEventArgs e){if(PreviewOnlyFeedback())return;activeModBlocker=null;activeModBlockerGameKey=null;discoveryTimer.Stop();await ShowGame();}
@@ -1423,6 +1424,20 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
         ScsRecorder.IsEnabled=blocked==null&&!developerMyGamesPreview;
         ScsRecorderText.Text=blocked??(brokenBesideCopy?"This recorder is too old for this game's driver copy and stops the game from starting. Turn this off."
             :installed?"SCSKiller's recorder is in this game's folder. "+RecorderUse:"Puts SCSKiller's recorder (a d3d12.dll) in this game's folder. "+RecorderUse);
+    }
+    // Blocked by an older SCSKiller recorder: the selected SCSKiller replaces it with its exe.local-aware one ("record
+    // install" updates an older recorder of its own), then the game is checked again.
+    async void UpdateBlockingRecorder(){
+        if(PreviewOnlyFeedback()||selected is not SteamGame game||scs==null||busy)return;
+        if(!await Confirm("Use Arc Cache's recorder",$"Replace SCSKiller's recorder in {game.Name}'s folder with the one from Arc Cache's SCSKiller? It records the same way and also runs beside a driver copy. If the official SCSKiller app later installs a newer version of its own, Arc Cache shows this again.","Replace"))return;
+        await Run($"Replacing SCSKiller's recorder for {game.Name}…",async()=>{
+            if(GameProcessRunning(game.SupportedExecutable))throw new InvalidOperationException("Close the game first.");
+            var lines=new System.Collections.Concurrent.ConcurrentQueue<string>();
+            int code=await scs.RecorderAsync(game.AppId,true,line=>{lines.Enqueue(line);DispatcherQueue.TryEnqueue(()=>Log(line));},CancellationToken.None);
+            if(code!=0)throw new InvalidOperationException(lines.LastOrDefault(l=>l.Contains("error",StringComparison.OrdinalIgnoreCase))?.Replace("SCSKiller log: ","").Replace("SCSKiller: ","")??"SCSKiller could not replace the recorder.");
+        });
+        if(activeModBlocker?.Path is not string dll||!ScsKillerBridge.IsDotLocalAware(dll)){Log("The recorder in "+game.Name+"'s folder is still the older one.");return;}
+        activeModBlocker=null;activeModBlockerGameKey=null;await ShowGame();
     }
     async void ScsRecorderToggled(object sender,RoutedEventArgs e){
         if(scsRecorderRendering||selected is not SteamGame game||scs==null)return;

@@ -119,7 +119,10 @@ try {
     if (!$SkipScs) {
         if (!$cmake) { throw 'cmake not found (install the VS "C++ CMake tools" component)' }
         $nb = Join-Path $scs 'proxy\build'
-        Run 'scs-native-configure' $cmake @('-S', (Join-Path $scs 'proxy'), '-B', $nb, '-A', 'x64')
+        # The recorder's version: just above the official SCSKiller release it must replace (1.3.0), so either app keeps
+        # this exe.local-aware recorder until the official app ships a newer one. Raise it with each official release.
+        $nativeVersion = '1.3.0-arc.1'
+        Run 'scs-native-configure' $cmake @('-S', (Join-Path $scs 'proxy'), '-B', $nb, '-A', 'x64', "-DSCSK_VERSION=$nativeVersion")
         Run 'scs-native-build' $cmake @('--build', $nb, '--config', 'Release', '--target', 'scskiller', 'scskiller_warm', 'scskiller_warm_segheap')
         Run 'scs-tests' $dotnet @('test', (Join-Path $scs 'tests\SCSKiller.Tests\SCSKiller.Tests.csproj'), '-c', 'Release', '--filter', 'FullyQualifiedName~ArcCacheDriver|FullyQualifiedName~IntelCacheCap|FullyQualifiedName~WarmerTests')
         $cli = Join-Path $scsOut 'cli'; $native = Join-Path $scsOut 'native'

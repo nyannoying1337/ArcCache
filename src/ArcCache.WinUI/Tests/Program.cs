@@ -240,6 +240,13 @@ Test("SCSKiller bridge uses selected Steam ID, child-only Intel opt-in and no sh
     Check(command.Environment["SCSKILLER_EXPERIMENTAL_INTEL"]=="1","Missing explicit child opt-in.");
     bool rejected=false;try{ScsKillerBridge.Command(command.FileName,"record",292030);}catch(ArgumentException){rejected=true;}Check(rejected,"Recorder installation must not be exposed through bridge.");
 });
+Test("My games: an older SCSKiller recorder offers Arc Cache's, any other mod the game folder",()=>{
+    var recorder=new LocalModBlocker(@"C:\Games\FF7\Win64\d3d12.dll",ProductName:"SCSKiller",FileDescription:"SCSKiller D3D12 proxy",CompanyName:"The SCSKiller authors");
+    var update=MyGamesPageStates.Resolve(new MyGamesPageInputs(ModBlocker:recorder,RecorderUpdate:true));
+    Check(update.AccentAction==MyGamesAction.UpdateRecorder&&update.AccentButton=="Use Arc Cache's recorder"&&update.ListBadge=="Blocked"&&update.Warning!.Contains("can't run beside a driver copy"),"An older recorder must offer Arc Cache's: "+update.AccentButton);
+    var other=MyGamesPageStates.Resolve(new MyGamesPageInputs(ModBlocker:recorder));
+    Check(other.AccentAction==MyGamesAction.OpenGameFolder,"Without a newer recorder at hand the folder opens, as for any mod.");
+});
 Test("SCSKiller's recorder: its own command, recognised by its version information",()=>{
     var on=ScsKillerBridge.RecorderCommand(Path.Combine(Path.GetTempPath(),"scskiller.exe"),1144200,true);
     Check(on.ArgumentList.SequenceEqual(new[]{"record","install","steam:1144200"})&&!on.UseShellExecute&&on.Environment["SCSKILLER_EXPERIMENTAL_INTEL"]=="1","Unexpected recorder command: "+string.Join(" ",on.ArgumentList));
