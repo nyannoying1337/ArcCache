@@ -39,8 +39,6 @@ foreach(var row in GraphicsPageState.ReadinessStateTable)Test("Graphics/My games
 Test("Automatic game polling does not flash Checking or rerender unchanged results",()=>{
  Check(!GamePollPolicy.ShouldRender(MyGamesLoadResult.Unknown,MyGamesLoadResult.Unknown),"Repeated background observations must not rerender My games.");
  Check(GamePollPolicy.ShouldRender(MyGamesLoadResult.Unknown,MyGamesLoadResult.DriverCopyLoaded),"A changed observation must update the page.");
- Check(GamePollPolicy.ShouldStop("The game is not running."),"Polling must stop when the game is not running.");
- Check(!GamePollPolicy.ShouldStop("Loaded driver observed."),"A live game observation must not stop before it is classified.");
 });
 GameLibraryTests.Run(Test,Check);
 Check(MyGamesPageStates.StateTable.Select(r=>r.Key).Distinct(StringComparer.Ordinal).Count()==MyGamesPageStates.StateTable.Count,"My games preview keys must be unique.");

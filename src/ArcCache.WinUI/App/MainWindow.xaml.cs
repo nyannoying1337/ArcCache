@@ -72,8 +72,7 @@ public partial class MainWindow : Window {
     bool chipChoiceConfirmed;
     readonly DispatcherTimer discoveryTimer=new(){Interval=TimeSpan.FromSeconds(4)};
     // The game whose driver copy was confirmed loading; while it runs, polling only checks that it is still running.
-    string? confirmedRunningExe;DateTime lastLivenessCheck;
-    static readonly TimeSpan LivenessInterval=TimeSpan.FromSeconds(15);
+    string? observedRunningExe; // the selected game's run the page has seen; null = not running (or not seen yet)
     const string GameClosedMessage="This game is not running. Start it through its launcher, leave it at the menu, and check again.";
     string discoveryMessage="";
     bool preview;
@@ -496,7 +495,9 @@ public partial class MainWindow : Window {
                 if(await DiscoverSelected(true)&&selected?.Key==id&&!busy)await ShowGame();
                 else if(activeModBlocker is not null&&selected?.Key==id&&!busy)RenderMyGames();
             }else if(NeedsControlObservation()) {
-                // Polling never enters global busy mode, clears artwork, or rechecks Steam safety.
+                // Polling never enters global busy mode, clears artwork, or rechecks Steam safety. The worker only runs
+                // once the game does: Steam can take a while to start it.
+                if(!GameProcessRunning(game.SupportedExecutable))return;
                 var result=await safety.RunAsync(new("VerifyControl",ReceiptPath:store.Receipt(id),ReadOnly:preview));
                 if(!result.Ok)throw new InvalidOperationException(result.Message);
                 if(selected?.Key!=id||busy)return;
@@ -504,20 +505,18 @@ public partial class MainWindow : Window {
                     if(!await ReadSetup(game))return;
                     gameLoadResult=MyGamesLoadResult.DriverCopyLoaded;
                     RenderSetup();Log("Original private-driver loading checked automatically.");
-                    discoveryTimer.Stop();
                 }
             }else if(selectedReceipt is not null&&game.Supported){
-                // Once the driver copy is confirmed and its check saved, only watch for the game closing: a cheap
-                // in-process check every 15 s instead of a worker process, module scan and driver hash every 4 s.
-                if(confirmedRunningExe is not null&&string.Equals(confirmedRunningExe,game.SupportedExecutable,StringComparison.OrdinalIgnoreCase)&&gameLoadResult==MyGamesLoadResult.DriverCopyLoaded&&ReceiptLoadVerified()){
-                    if(DateTime.UtcNow-lastLivenessCheck<LivenessInterval)return;
-                    lastLivenessCheck=DateTime.UtcNow;
-                    if(GameProcessRunning(game.SupportedExecutable))return;
-                    confirmedRunningExe=null;var before=gameLoadResult;gameLoadResult=MyGamesLoadResult.Unknown;RuntimeDetails.Text=GameClosedMessage;discoveryTimer.Stop();
+                // Watches the game as long as its page is open, however it was started: a cheap in-process check every
+                // tick, and the worker's module scan and driver hash only while a run isn't classified yet.
+                if(!GameProcessRunning(game.SupportedExecutable)){
+                    if(observedRunningExe is null)return;
+                    observedRunningExe=null;var before=gameLoadResult;gameLoadResult=MyGamesLoadResult.Unknown;RuntimeDetails.Text=GameClosedMessage;
                     if(GamePollPolicy.ShouldRender(before,gameLoadResult))RenderMyGames();
                     return;
                 }
-                confirmedRunningExe=null;
+                if(observedRunningExe is not null&&gameLoadResult!=MyGamesLoadResult.Unknown)return; // this run is classified
+                observedRunningExe=game.SupportedExecutable;
                 var observed=await safety.RunAsync(new("ObserveGame",game.SupportedExecutable,ReadOnly:preview));
                 if(selected?.Key!=id||busy)return;
                 string message=observed.Message;RuntimeDetails.Text=message;
@@ -529,9 +528,7 @@ public partial class MainWindow : Window {
                         if(verify.Ok&&verify.Data.GetProperty("Verified").GetBoolean()&&selected?.Key==id&&!busy&&await ReadSetup(game)){saved=true;RenderSetup();Log("Cache size "+CacheLabel(selectedReceipt?.MiB??512)+" loaded in game; check saved.");}}
                     catch(Exception ex){Log("Saving the load check failed: "+ex.Message);}
                 }
-                // Keep polling while the game runs so the page notices when it closes.
-                if(GamePollPolicy.ShouldStop(message)||gameLoadResult is MyGamesLoadResult.NormalDriverLoaded)discoveryTimer.Stop();
-                else if(gameLoadResult==MyGamesLoadResult.DriverCopyLoaded&&ReceiptLoadVerified()){confirmedRunningExe=game.SupportedExecutable;lastLivenessCheck=DateTime.UtcNow;await LinkCacheFileFromGame(game);}
+                if(gameLoadResult==MyGamesLoadResult.DriverCopyLoaded&&ReceiptLoadVerified())await LinkCacheFileFromGame(game);
                 if(saved||GamePollPolicy.ShouldRender(previous,gameLoadResult))RenderMyGames();
             }
             lastBackgroundError="";
@@ -717,7 +714,7 @@ public partial class MainWindow : Window {
         if(PreviewOnlyFeedback())return;discoveryTimer.Stop();gameLoadResult=MyGamesLoadResult.Failed;RenderMyGames();
     }
     async Task ShowGame() {
-        discoveryTimer.Stop();var game=selected;if(activeModBlockerGameKey!=game?.Key){activeModBlocker=null;activeModBlockerGameKey=null;}Details.Visibility=Visibility.Visible;if(game==null){GameTitle.Text="Choose a game";GameStatus.Text="Choose a game from the list.";UpdateButtons();RenderMyGames();RefreshHome();return;}
+        discoveryTimer.Stop();var game=selected;if(!string.Equals(observedRunningExe,game?.SupportedExecutable,StringComparison.OrdinalIgnoreCase))observedRunningExe=null;if(activeModBlockerGameKey!=game?.Key){activeModBlocker=null;activeModBlockerGameKey=null;}Details.Visibility=Visibility.Visible;if(game==null){GameTitle.Text="Choose a game";GameStatus.Text="Choose a game from the list.";UpdateButtons();RenderMyGames();RefreshHome();return;}
         if(!games.Any(g=>g.Key==game.Key)){
             GameTitle.Text=game.Name;GameSource.Text=game.Source.ToUpperInvariant()+" LIBRARY";setupState=null;recordValid=false;receiptValid=false;selectedReceipt=null;
             try{string receipt=store.Receipt(game);if(File.Exists(receipt))selectedReceipt=JsonSerializer.Deserialize<ReceiptState>(File.ReadAllText(receipt),new JsonSerializerOptions{PropertyNameCaseInsensitive=true});}catch(Exception error){Log("Saved setup could not be read: "+error.Message);}
@@ -742,7 +739,7 @@ public partial class MainWindow : Window {
         if(selectedReceipt?.MiB==512&&selectedReceipt.Status=="original-control-loading-verified")gameLoadResult=MyGamesLoadResult.DriverCopyLoaded;
         if(setupState?.Configured==true&&selectedReceipt?.MiB>512)desiredLimits[game.Key]=selectedReceipt.MiB;
         RenderSetup();
-        if(activeModBlocker is null&&(!preview||previewWatchSeconds>0)&&(!game.Supported||TrialMode&&!game.TrialProfileReady||NeedsControlObservation()||selectedReceipt?.MiB>512||sightings?.Get(game.Key) is not null))discoveryTimer.Start();RenderMyGames();RefreshHome();
+        if(activeModBlocker is null&&(!preview||previewWatchSeconds>0)&&(!game.Supported||TrialMode&&!game.TrialProfileReady||NeedsControlObservation()||selectedReceipt is not null||sightings?.Get(game.Key) is not null))discoveryTimer.Start();RenderMyGames();RefreshHome();
     }
     void ArtworkOpened(object sender,RoutedEventArgs e)=>GamePlaceholder.Visibility=Visibility.Collapsed;
     void ArtworkFailed(object sender,ExceptionRoutedEventArgs e)=>GamePlaceholder.Visibility=Visibility.Visible;
@@ -1401,28 +1398,35 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
         if(selected?.Source=="Steam")RenderScsDetails(DetailsFor(selected));
         RenderScsRecorder();
     }
-    // Record while playing: SCSKiller's recorder (a d3d12.dll) in the game's folder, read from the folder itself.
-    //   no SCSKiller selected  -> off, disabled  "Choose SCSKiller in Settings first."
-    //   game folder unknown    -> off, disabled  "Start the game once in DirectX 12 so Arc Cache can find its folder."
-    //   a step is running      -> as is, disabled "Wait for the current step to finish."
-    //   game running           -> as is, disabled "Close the game to change this."
-    //   installed / not        -> on / off       what it does
+    // Frame-time graph: SCSKiller's recorder (a d3d12.dll) in the game's folder, read from the folder itself. It can't run
+    // beside a driver copy: with exe.local, Windows hands the recorder itself back for the System32 d3d12.dll it loads,
+    // and it refuses to start, so the game can't load DirectX (PEAK crashed on start). First match:
+    //   no SCSKiller selected      -> off, disabled  "Choose SCSKiller in Settings first."
+    //   not a Steam game           -> off, disabled  "Only for Steam games."
+    //   game folder unknown        -> off, disabled  "Start the game once in DirectX 12 so Arc Cache can find its folder."
+    //   a step is running          -> as is, disabled "Wait for the current step to finish."
+    //   game running               -> as is, disabled "Close the game to change this."
+    //   driver copy, recorder in   -> on, enabled    "…stops the game from starting. Turn this off."
+    //   driver copy                -> off, disabled  "Can't be used while this game has a driver copy…"
+    //   installed / not            -> on / off       what it does
     bool scsRecorderRendering;
-    const string RecorderUse="It notes the shaders the game creates, so the next shader preparation includes them, and gives on-screen stats their frame-time graph.";
+    const string RecorderUse="It gives on-screen stats their frame-time graph and notes the shaders the game creates for the next shader preparation.";
+    static bool HasDriverCopy(string exe)=>Directory.Exists(exe+".local")||File.Exists(exe+".local");
     void RenderScsRecorder(){
         if(ScsRecorder==null)return;
-        string? exe=selected?.SupportedExecutable;bool installed=ScsKillerBridge.RecorderInstalled(exe),running=exe!=null&&GameProcessRunning(exe);
-        string? blocked=scs?.CliPath==null?"Choose SCSKiller in Settings first.":exe==null?"Start the game once in DirectX 12 so Arc Cache can find its folder."
-            :busy||scsRunning?"Wait for the current step to finish.":running?"Close the game to change this.":null;
+        string? exe=selected?.SupportedExecutable;bool installed=ScsKillerBridge.RecorderInstalled(exe),running=exe!=null&&GameProcessRunning(exe),copy=exe!=null&&HasDriverCopy(exe);
+        string? blocked=scs?.CliPath==null?"Choose SCSKiller in Settings first.":selected?.Source!="Steam"?"Only for Steam games.":exe==null?"Start the game once in DirectX 12 so Arc Cache can find its folder."
+            :busy||scsRunning?"Wait for the current step to finish.":running?"Close the game to change this.":copy&&!installed?"Can't be used while this game has a driver copy: Windows would load the recorder in place of DirectX, and the game wouldn't start.":null;
         scsRecorderRendering=true;try{ScsRecorder.IsOn=installed;}finally{scsRecorderRendering=false;}
         ScsRecorder.IsEnabled=blocked==null&&!developerMyGamesPreview;
-        ScsRecorderText.Text=blocked??(installed?"SCSKiller's recorder is in this game's folder. "+RecorderUse:"Puts SCSKiller's recorder (a d3d12.dll) in this game's folder. "+RecorderUse);
+        ScsRecorderText.Text=blocked??(copy?"This game has a driver copy, so the recorder stops it from starting. Turn this off."
+            :installed?"SCSKiller's recorder is in this game's folder. "+RecorderUse:"Puts SCSKiller's recorder (a d3d12.dll) in this game's folder. "+RecorderUse);
     }
     async void ScsRecorderToggled(object sender,RoutedEventArgs e){
         if(scsRecorderRendering||selected is not SteamGame game||scs==null)return;
         bool install=ScsRecorder.IsOn;
-        if(busy||scsRunning||game.SupportedExecutable==null){RenderScsRecorder();return;}
-        if(install&&!await Confirm("Record while playing",$"Put SCSKiller's recorder in {game.Name}'s folder? It is a d3d12.dll that loads with the game and passes everything on to Windows' DirectX. SCSKiller refuses games with anti-cheat or another DirectX mod. Turning this off removes exactly the files it added.","Turn on")){RenderScsRecorder();return;}
+        if(busy||scsRunning||game.SupportedExecutable==null||install&&HasDriverCopy(game.SupportedExecutable)){RenderScsRecorder();return;}
+        if(install&&!await Confirm("Frame-time graph",$"Put SCSKiller's recorder in {game.Name}'s folder? It is a d3d12.dll that loads with the game and passes everything on to Windows' DirectX. SCSKiller refuses games with anti-cheat or another DirectX mod. While it is in, Arc Cache can't set up this game. Turning this off removes exactly the files it added.","Turn on")){RenderScsRecorder();return;}
         await Run(install?$"Turning on recording for {game.Name}…":$"Turning off recording for {game.Name}…",async()=>{
             if(GameProcessRunning(game.SupportedExecutable))throw new InvalidOperationException("Close the game first.");
             var lines=new System.Collections.Concurrent.ConcurrentQueue<string>();
