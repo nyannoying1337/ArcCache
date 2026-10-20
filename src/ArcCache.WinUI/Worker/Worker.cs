@@ -256,7 +256,7 @@ class Worker {
         try {
             // --cache-monitor exe [cacheMiB] [linkedFile|-] [expectedBytes] [game name] [corner]
             if((args.Length>=2&&args.Length<=7)&&args[0]=="--cache-monitor") {
-                MatchedSet.ValidateGame(args[1]);System.Windows.Forms.Application.EnableVisualStyles();
+                MatchedSet.ValidateGame(args[1],null,false);System.Windows.Forms.Application.EnableVisualStyles(); // only watches: a mod beside the exe doesn't block it
                 int recordedMiB=512;if(args.Length>=3&&!Int32.TryParse(args[2],out recordedMiB))throw new InvalidDataException("Invalid cache-size receipt value.");
                 string linkedFile=args.Length>=4&&args[3]!="-"?args[3]:null;if(linkedFile!=null&&!System.Text.RegularExpressions.Regex.IsMatch(linkedFile,"^[0-9A-Fa-f]{64}$"))throw new InvalidDataException("Invalid cache file name.");
                 long expectedBytes=0;if(args.Length>=5&&(!Int64.TryParse(args[4],System.Globalization.NumberStyles.None,System.Globalization.CultureInfo.InvariantCulture,out expectedBytes)||expectedBytes>(1L<<40)))throw new InvalidDataException("Invalid expected cache size.");

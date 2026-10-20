@@ -84,11 +84,12 @@ public static class MatchedSet {
     };
     static void Require(bool yes,string message){if(!yes)throw new InvalidDataException(message);}
     static void Closed(string executable,ProfileInfo observed=null){var profile=observed??Profile(executable);foreach(string name in new[]{Path.GetFileNameWithoutExtension(executable),profile.Launcher}.Where(n=>n!=null))foreach(var process in Process.GetProcessesByName(name))using(process)throw new InvalidOperationException("Close "+profile.Name+" before changing its private set.");}
-    public static void ValidateGame(string executable,ProfileInfo observed=null) {
+    // withDriverCopy false: for what only watches the game (the on-screen stats), where a mod beside the exe doesn't matter.
+    public static void ValidateGame(string executable,ProfileInfo observed=null,bool withDriverCopy=true) {
         string full=Path.GetFullPath(executable);Engine.CheckPath(full);
         var profile=observed??Profile(full);
         Require(IsolationControl.FileHash(full)==profile.Hash,"Unsupported "+profile.Name+" executable. Launch the updated game with the stock driver to rediscover its profile.");
-        Isolation.RequireNoLocalD3D12(full);
+        if(withDriverCopy)Isolation.RequireNoLocalD3D12(full);
     }
     // Microsoft Windows 10.0.26100.9549 AMD64 helpers: source signatures were
     // verified during support qualification. Copy locally; never ship these DLLs.
