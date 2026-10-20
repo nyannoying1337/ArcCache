@@ -5,12 +5,13 @@ class CacheMonitorTests {
     // scskiller_frames.bin and scskiller_creates.csv as the recorder writes them: the launch starts at 1000 ms on its clock.
     // sameLaunch false: the csv's compiles belong to an earlier launch.
     static void WriteRecording(string folder,long unix,bool sameLaunch){
-        var frames=new List<uint>();double t=1000,shaderEnd=0;
-        foreach(int ms in Durations()){frames.Add((uint)(ms*1000));t+=ms;if(ms==120)shaderEnd=t;}
+        var frames=new List<uint>();double t=1000,shaderEnd=0,loadEnd=0;
+        foreach(int ms in Durations()){frames.Add((uint)(ms*1000));t+=ms;if(ms==120)shaderEnd=t;if(ms==1500)loadEnd=t;}
         using(var w=new BinaryWriter(File.Create(Path.Combine(folder,"scskiller_frames.bin")))){w.Write(0xFFFFFFFFu);w.Write(unix);w.Write(1000000L);w.Write(0L);w.Write(10000000L);foreach(uint f in frames)w.Write(f);}
-        File.WriteAllText(Path.Combine(folder,"scskiller_creates.csv"),"#session,"+(sameLaunch?unix:unix-99999)+",game.exe\n#clock,1000\n"+(shaderEnd-30).ToString(System.Globalization.CultureInfo.InvariantCulture)+",G,0,0,40.0,abc,0.1,5,1\n");
+        File.WriteAllText(Path.Combine(folder,"scskiller_creates.csv"),"#session,"+(sameLaunch?unix:unix-99999)+",game.exe\n#clock,1000\n"+(shaderEnd-30).ToString(System.Globalization.CultureInfo.InvariantCulture)+",G,0,0,40.0,abc,0.1,5,1\n"
+            +(loadEnd-500).ToString(System.Globalization.CultureInfo.InvariantCulture)+",G,0,0,40.0,def,0.1,5,1\n");
     }
-    static IEnumerable<int> Durations(){for(int i=0;i<300;i++)yield return 16;yield return 120;for(int i=0;i<200;i++)yield return 16;yield return 80;for(int i=0;i<400;i++)yield return 16;}
+    static IEnumerable<int> Durations(){for(int i=0;i<300;i++)yield return 16;yield return 120;for(int i=0;i<200;i++)yield return 16;yield return 80;yield return 1500;for(int i=0;i<400;i++)yield return 16;}
     [STAThread]static void Main(string[] args){string root=Path.Combine(Path.GetTempPath(),"ArcCacheMonitorTest-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
         try {File.WriteAllBytes(Path.Combine(root,"a"),new byte[100]);var initial=CacheSnapshot.Read(root);Check(initial.Bytes==100&&initial.Files==1&&initial.Unreadable==0,"Initial file size measured");
             Check(CacheSnapshot.Read(root).ChangedSince(initial)==0,"Idle cache reports zero change");
@@ -21,7 +22,7 @@ class CacheMonitorTests {
             string game=Path.Combine(root,"game");Directory.CreateDirectory(game);long unix=DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             WriteRecording(game,unix,true);var feed=new StutterFeed(game,unix-60000);feed.Update();
             Check(feed.Active&&feed.ShaderStutters==1&&Math.Abs(feed.WorstMs-120)<0.01,"Recorder: a slow frame under a compile is a shader stutter");
-            Check(feed.Recent().Count==2&&feed.Recent().FindAll(delegate(StutterFeed.Hitch h){return !h.Shader;}).Count==1,"Recorder: a slow frame without a compile is another hitch");
+            Check(feed.Recent().Count==3&&feed.Recent().FindAll(delegate(StutterFeed.Hitch h){return !h.Shader;}).Count==2,"Recorder: a slow frame without a compile is another hitch, a 1.5 s one under a compile is loading");
             Check(Math.Abs(feed.Fps-62.5)<1,"Recorder: frame rate from the last 5 s");
             double[] columns=feed.Columns(120);Check(columns.Length==120&&columns[119]>=15&&Array.Exists(columns,delegate(double c){return c>=119;}),"Recorder: the graph's columns keep the slowest frame");
             feed.Update();Check(feed.ShaderStutters==1,"Recorder: a second read counts nothing twice");

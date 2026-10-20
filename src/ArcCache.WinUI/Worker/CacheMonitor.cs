@@ -30,12 +30,12 @@ class CacheSnapshot {
 
 // What the overlay shows, from one state (AGENTS.md). Status pill, first match wins:
 //   driver not checked yet            -> wait  "Checking the driver…"
-//   normal driver loaded              -> warn  "Normal driver · capped at 512 MB"
+//   normal driver, larger size chosen -> warn  "Normal driver · capped at 512 MB" (Default expects the normal driver)
 //   game's file shrank                -> warn  "Cache file shrank · driver trimmed it"
 //   cache file not open yet           -> wait  "Waiting for the game's cache file"
 //   another file grows much faster    -> warn  "Another cache file is growing"
 //   first minute                      -> wait  "Watching… play for a minute"
-//   little growth, copy loaded        -> good  "Reading the prepared cache"
+//   little growth, copy loaded/Default-> good  "Reading the prepared cache"
 //   little growth, copy not confirmed -> wait  "Little compiling · copy not confirmed"
 //   still growing                     -> info  "Adding new shaders · normal in new areas"
 // Under it: the cache file bar (share of the game's cache size, a tick at SCSKiller's expected size) and one footer line.
@@ -203,14 +203,14 @@ class CacheMonitor : Form {
         bool copyLoaded=driverStatus.StartsWith("Game setup: custom copy loaded",StringComparison.Ordinal);
         if(driverStatus=="Driver: not checked"){tone=OverlayTone.Wait;status="Checking the driver…";return;}
         // The verdict follows the driver: with the normal driver the larger limit does not apply at all.
-        if(driverStatus.StartsWith("Game setup: normal or other copy loaded",StringComparison.Ordinal)){tone=OverlayTone.Warn;status="Normal driver · capped at 512 MB";return;}
+        if(limitMiB>512&&driverStatus.StartsWith("Game setup: normal or other copy loaded",StringComparison.Ordinal)){tone=OverlayTone.Warn;status="Normal driver · capped at 512 MB";return;}
         long before=0;if(name!=null)initial.Sizes.TryGetValue(name,out before);
         if(name!=null&&before>(512L<<20)+(1L<<20)&&size<before-(1L<<20)){tone=OverlayTone.Warn;status="Cache file shrank · driver trimmed it";return;}
         if(ActiveFile==null){tone=OverlayTone.Wait;status="Waiting for the game's cache file";return;}
         long otherGrowth=0;foreach(var pair in now.Sizes){if(pair.Key.Equals(name,StringComparison.OrdinalIgnoreCase))continue;long old;long grew=pair.Value-(initial.Sizes.TryGetValue(pair.Key,out old)?old:0);if(grew>otherGrowth)otherGrowth=grew;}
         if(otherGrowth>(64L<<20)&&otherGrowth>Math.Max(grewSince,0)*4){tone=OverlayTone.Warn;status="Another cache file is growing (+"+Amount(otherGrowth)+")";return;}
         if((DateTime.Now-monitorStarted).TotalSeconds<60){tone=OverlayTone.Wait;status="Watching… play for a minute";return;}
-        if(grewSince<(32L<<20)){tone=copyLoaded?OverlayTone.Good:OverlayTone.Wait;status=copyLoaded?"Reading the prepared cache":"Little compiling · copy not confirmed";return;}
+        if(grewSince<(32L<<20)){bool expected=copyLoaded||limitMiB<=512;tone=expected?OverlayTone.Good:OverlayTone.Wait;status=expected?"Reading the prepared cache":"Little compiling · copy not confirmed";return;}
         tone=OverlayTone.Info;status="Adding new shaders · normal in new areas";
     }
     // The file the game itself has open (Restart Manager) beats the saved link: a compile also fills the game's separate
@@ -267,6 +267,7 @@ class CacheMonitor : Form {
 // stamped after the game started counts. A frame of 50 ms or more is classified 3 s after it ended (the recorder writes
 // once a second), like SCSKiller's FrameLog without its startup and quit windows:
 //   no create overlaps it and it took 5 s or more               -> a pause, not counted
+//   1 s or more                                                 -> loading (a load screen, not a stutter)
 //   compiles on 8 threads or more overlap it, none presenting    -> loading
 //   compiles of 100 ms or more fill half of it                   -> shader stutter
 //   100 creates or more overlap it                               -> loading
@@ -372,6 +373,7 @@ class StutterFeed {
             if(c.Ms>=100)cold+=Math.Min(c.End,end)-Math.Max(c.Start,start);
         }
         if(overlapping==0&&ms>=5000)return null;
+        if(ms>=1000)return false;
         if(threads.Count>=8&&!presenting)return false;
         if(cold>=ms/2)return true;
         if(overlapping>=100)return false;
