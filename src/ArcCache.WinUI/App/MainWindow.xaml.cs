@@ -1399,6 +1399,38 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
         ScsProgressPanel.Visibility=scsProgressGameKey!=null&&scsProgressGameKey==selected?.Key?Visibility.Visible:Visibility.Collapsed;
         ScsDetails.Children.Clear();
         if(selected?.Source=="Steam")RenderScsDetails(DetailsFor(selected));
+        RenderScsRecorder();
+    }
+    // Record while playing: SCSKiller's recorder (a d3d12.dll) in the game's folder, read from the folder itself.
+    //   no SCSKiller selected  -> off, disabled  "Choose SCSKiller in Settings first."
+    //   game folder unknown    -> off, disabled  "Start the game once in DirectX 12 so Arc Cache can find its folder."
+    //   a step is running      -> as is, disabled "Wait for the current step to finish."
+    //   game running           -> as is, disabled "Close the game to change this."
+    //   installed / not        -> on / off       what it does
+    bool scsRecorderRendering;
+    const string RecorderUse="It notes the shaders the game creates, so the next shader preparation includes them, and gives on-screen stats their frame-time graph.";
+    void RenderScsRecorder(){
+        if(ScsRecorder==null)return;
+        string? exe=selected?.SupportedExecutable;bool installed=ScsKillerBridge.RecorderInstalled(exe),running=exe!=null&&GameProcessRunning(exe);
+        string? blocked=scs?.CliPath==null?"Choose SCSKiller in Settings first.":exe==null?"Start the game once in DirectX 12 so Arc Cache can find its folder."
+            :busy||scsRunning?"Wait for the current step to finish.":running?"Close the game to change this.":null;
+        scsRecorderRendering=true;try{ScsRecorder.IsOn=installed;}finally{scsRecorderRendering=false;}
+        ScsRecorder.IsEnabled=blocked==null&&!developerMyGamesPreview;
+        ScsRecorderText.Text=blocked??(installed?"SCSKiller's recorder is in this game's folder. "+RecorderUse:"Puts SCSKiller's recorder (a d3d12.dll) in this game's folder. "+RecorderUse);
+    }
+    async void ScsRecorderToggled(object sender,RoutedEventArgs e){
+        if(scsRecorderRendering||selected is not SteamGame game||scs==null)return;
+        bool install=ScsRecorder.IsOn;
+        if(busy||scsRunning||game.SupportedExecutable==null){RenderScsRecorder();return;}
+        if(install&&!await Confirm("Record while playing",$"Put SCSKiller's recorder in {game.Name}'s folder? It is a d3d12.dll that loads with the game and passes everything on to Windows' DirectX. SCSKiller refuses games with anti-cheat or another DirectX mod. Turning this off removes exactly the files it added.","Turn on")){RenderScsRecorder();return;}
+        await Run(install?$"Turning on recording for {game.Name}…":$"Turning off recording for {game.Name}…",async()=>{
+            if(GameProcessRunning(game.SupportedExecutable))throw new InvalidOperationException("Close the game first.");
+            var lines=new System.Collections.Concurrent.ConcurrentQueue<string>();
+            int code=await scs.RecorderAsync(game.AppId,install,line=>{lines.Enqueue(line);DispatcherQueue.TryEnqueue(()=>Log(line));},CancellationToken.None);
+            if(code!=0)throw new InvalidOperationException(lines.LastOrDefault(l=>l.Contains("error",StringComparison.OrdinalIgnoreCase))?.Replace("SCSKiller log: ","").Replace("SCSKiller: ","")??"SCSKiller could not change the recorder.");
+            if(ScsKillerBridge.RecorderInstalled(game.SupportedExecutable)!=install)throw new InvalidOperationException(install?"SCSKiller didn't put its recorder in the game's folder.":"SCSKiller's recorder is still in the game's folder.");
+        });
+        RenderScsRecorder();
     }
     static string Size(long bytes)=>bytes>=1L<<30?(bytes/(double)(1L<<30)).ToString("0.00",System.Globalization.CultureInfo.InvariantCulture)+" GB":(bytes/(double)(1L<<20)).ToString("0",System.Globalization.CultureInfo.InvariantCulture)+" MB";
     void ShowScsOptions(){

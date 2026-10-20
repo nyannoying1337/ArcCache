@@ -123,10 +123,30 @@ public sealed class ScsKillerBridge(string settingsPath) {
         if(full.Contains("portable",StringComparison.OrdinalIgnoreCase))return "Portable SCSKiller";
         return "Installed SCSKiller";
     }
-    public async Task<int> RunAsync(string action,uint appId,Action<string> progress,CancellationToken cancel,PrivateDriverWarm? privateDriver=null) {
+    /// <summary>SCSKiller's recorder: "record install|uninstall steam:N". SCSKiller checks the game (anti-cheat, another
+    /// DirectX mod, a running game) and adds or removes exactly its own files.</summary>
+    public static ProcessStartInfo RecorderCommand(string cli,uint appId,bool install) {
+        if(appId==0)throw new ArgumentException("Only a Steam game's recorder can be changed.");
+        var info=new ProcessStartInfo(Path.GetFullPath(cli)){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,RedirectStandardInput=true,WorkingDirectory=Path.GetDirectoryName(Path.GetFullPath(cli))!};
+        info.ArgumentList.Add("record");info.ArgumentList.Add(install?"install":"uninstall");info.ArgumentList.Add("steam:"+appId);
+        foreach(string key in HandoffEnvironmentKeys)info.Environment.Remove(key);
+        info.Environment["SCSKILLER_EXPERIMENTAL_INTEL"]="1"; // SCSKiller supports a game on Intel only with it, as for status
+        return info;
+    }
+    /// <summary>Whether SCSKiller's recorder is in the game's folder: its d3d12.dll proxy, by its version information.</summary>
+    public static bool RecorderInstalled(string? executable)=>executable!=null&&Path.GetDirectoryName(Path.GetFullPath(executable)) is string folder&&IsRecorder(Path.Combine(folder,"d3d12.dll"));
+    public static bool IsRecorder(string dll) {
+        if(!File.Exists(dll))return false;
+        try{var v=FileVersionInfo.GetVersionInfo(dll);return v.ProductName=="SCSKiller"&&v.FileDescription=="SCSKiller D3D12 proxy";}catch(FileNotFoundException){return false;}
+    }
+    public Task<int> RecorderAsync(uint appId,bool install,Action<string> progress,CancellationToken cancel)=>
+        RunProcess(()=>RecorderCommand(CliPath!,appId,install),progress,cancel);
+    public Task<int> RunAsync(string action,uint appId,Action<string> progress,CancellationToken cancel,PrivateDriverWarm? privateDriver=null)=>
+        RunProcess(()=>Command(CliPath!,action,appId,privateDriver,Options),progress,cancel);
+    async Task<int> RunProcess(Func<ProcessStartInfo> command,Action<string> progress,CancellationToken cancel) {
         if(CliPath==null||!File.Exists(CliPath))throw new FileNotFoundException("Choose the installed SCSKiller CLI in Settings first.");
         RequireConsole(CliPath);
-        using var process=Process.Start(Command(CliPath,action,appId,privateDriver,Options))??throw new IOException("SCSKiller could not start.");
+        using var process=Process.Start(command())??throw new IOException("SCSKiller could not start.");
         process.StandardInput.Close(); // No implicit affirmative answers to backend prompts.
         using var registration=cancel.Register(()=>{try{if(!process.HasExited)process.Kill(entireProcessTree:true);}catch(InvalidOperationException){}catch(System.ComponentModel.Win32Exception){}});
         async Task Read(StreamReader reader,string prefix) {

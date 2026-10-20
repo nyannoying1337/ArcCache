@@ -32,15 +32,23 @@ public static class Isolation {
         } finally {FreeLibrary(m);}
     }
     public static bool DotLocalCandidate(bool hasManifest,bool developerOverride) {return !hasManifest||developerOverride;}
+    // SCSKiller's recorder is a d3d12.dll proxy that passes every call on to Windows' d3d12.dll, which then loads the Intel
+    // driver from the game's .local copy as without it. It is recognised by its version information and is the one
+    // game-local DirectX DLL that doesn't block a setup. A mod it chains to (renamed d3d12.scskiller-next.dll) still does.
+    public static bool ScsKillerRecorder(string path) {
+        if(!File.Exists(path))return false;
+        var v=System.Diagnostics.FileVersionInfo.GetVersionInfo(path);
+        return v.ProductName=="SCSKiller"&&v.FileDescription=="SCSKiller D3D12 proxy";
+    }
     public static string LocalD3D12(string executable) {
         string candidate=Path.Combine(Path.GetDirectoryName(Path.GetFullPath(executable)),"d3d12.dll");
-        return File.Exists(candidate)?candidate:null;
+        return File.Exists(candidate)&&!ScsKillerRecorder(candidate)?candidate:null;
     }
     public static string LocalDirectXProxy(string executable) {
         string directory=Path.GetDirectoryName(Path.GetFullPath(executable));
-        foreach(string name in new[]{"d3d12.dll","dxgi.dll"}) {
+        foreach(string name in new[]{"d3d12.dll","dxgi.dll","d3d12.scskiller-next.dll"}) {
             string candidate=Path.Combine(directory,name);
-            if(File.Exists(candidate))return candidate;
+            if(File.Exists(candidate)&&!(name=="d3d12.dll"&&ScsKillerRecorder(candidate)))return candidate;
         }
         return null;
     }

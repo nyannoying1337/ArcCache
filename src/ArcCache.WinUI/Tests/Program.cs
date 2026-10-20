@@ -242,6 +242,19 @@ Test("SCSKiller bridge uses selected Steam ID, child-only Intel opt-in and no sh
     Check(command.Environment["SCSKILLER_EXPERIMENTAL_INTEL"]=="1","Missing explicit child opt-in.");
     bool rejected=false;try{ScsKillerBridge.Command(command.FileName,"record",292030);}catch(ArgumentException){rejected=true;}Check(rejected,"Recorder installation must not be exposed through bridge.");
 });
+Test("SCSKiller's recorder: its own command, recognised by its version information",()=>{
+    var on=ScsKillerBridge.RecorderCommand(Path.Combine(Path.GetTempPath(),"scskiller.exe"),1144200,true);
+    Check(on.ArgumentList.SequenceEqual(new[]{"record","install","steam:1144200"})&&!on.UseShellExecute&&on.Environment["SCSKILLER_EXPERIMENTAL_INTEL"]=="1","Unexpected recorder command: "+string.Join(" ",on.ArgumentList));
+    Check(ScsKillerBridge.RecorderCommand(on.FileName,1144200,false).ArgumentList.SequenceEqual(new[]{"record","uninstall","steam:1144200"}),"Unexpected recorder removal command.");
+    bool rejected=false;try{ScsKillerBridge.RecorderCommand(on.FileName,0,true);}catch(ArgumentException){rejected=true;}Check(rejected,"A recorder without a Steam ID was accepted.");
+    string folder=Path.Combine(Path.GetTempPath(),"ArcRecorder-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(folder);
+    try{
+        string exe=Path.Combine(folder,"game.exe");Check(!ScsKillerBridge.RecorderInstalled(exe),"An empty folder has a recorder.");
+        File.WriteAllText(Path.Combine(folder,"d3d12.dll"),"another mod");Check(!ScsKillerBridge.RecorderInstalled(exe),"Any d3d12.dll was taken for SCSKiller's recorder.");
+        string ff7=@"C:\Program Files (x86)\Steam\steamapps\common\FINAL FANTASY VII REMAKE\End\Binaries\Win64\d3d12.dll";
+        if(ScsKillerBridge.IsRecorder(ff7)){File.Copy(ff7,Path.Combine(folder,"d3d12.dll"),true);Check(ScsKillerBridge.RecorderInstalled(exe),"SCSKiller's recorder was not recognised.");}
+    }finally{Directory.Delete(folder,true);}
+});
 Test("SCSKiller options, progress lines and build support are read correctly",()=>{
     var tuned=ScsKillerBridge.Command(Path.Combine(Path.GetTempPath(),"scskiller.exe"),"compile",1,null,new ScsKillerOptions(8,true,false));
     Check(tuned.ArgumentList.SequenceEqual(new[]{"compile","steam:1","--threads","8","--idle"}),"Compile options were not passed: "+string.Join(" ",tuned.ArgumentList));
