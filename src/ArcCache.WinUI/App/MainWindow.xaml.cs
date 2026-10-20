@@ -613,15 +613,15 @@ public partial class MainWindow : Window {
         GameFlowCard.Visibility=state.ShowGameFlow?Visibility.Visible:Visibility.Collapsed;
         GraphicsGateCard.Visibility=state.ShowGraphicsGate?Visibility.Visible:Visibility.Collapsed;
         GameHeaderCard.Visibility=selected is null?Visibility.Collapsed:Visibility.Visible;
-        bool message=state.ShowEmptyLibrary||state.ShowNoSelection||state.Key is "dx12-unavailable" or "game-uninstalled" or "problem-recovery" or "size-retest-required" or "blocked-by-another-mod" or "setup-needs-attention" or "anticheat-running" or "anticheat-files" or "anticheat-with-copy";
+        bool message=state.ShowEmptyLibrary||state.ShowNoSelection||state.Key is "dx12-unavailable" or "game-uninstalled" or "problem-recovery" or "size-retest-required" or "blocked-by-another-mod" or "blocked-by-old-recorder" or "setup-needs-attention" or "anticheat-running" or "anticheat-files" or "anticheat-with-copy";
         LibraryMessageCard.Visibility=message?Visibility.Visible:Visibility.Collapsed;
         LibraryMessageTitle.Text=state.HeaderStatus;
         LibraryMessageText.Text=state.Warning??(state.ShowNoSelection?"Select a game from the list to see its setup steps.":state.ShowEmptyLibrary?"Add a game to start setting up game-specific driver copies.":string.Empty);
         SetupAttentionDetails.Visibility=state.Key=="setup-needs-attention"&&!string.IsNullOrWhiteSpace(input.DiscoveryMessage)?Visibility.Visible:Visibility.Collapsed;
         if(state.Key!="setup-needs-attention")SetupAttentionDetails.IsExpanded=false;SetupAttentionRawDetails.Text=input.DiscoveryMessage??string.Empty;
         LibraryMessageButton.Content=state.AccentButton;LibraryMessageButton.Visibility=state.AccentButton.Length>0?Visibility.Visible:Visibility.Collapsed;LibraryMessageButton.IsEnabled=!busy;
-        MyGamesAdvancedCard.Visibility=state.ShowEmptyLibrary||state.ShowNoSelection||state.Key is "blocked-by-another-mod" or "setup-needs-attention"?Visibility.Collapsed:Visibility.Visible;
-        BlockerCheckAgainLink.Visibility=state.Key=="blocked-by-another-mod"?Visibility.Visible:Visibility.Collapsed;
+        MyGamesAdvancedCard.Visibility=state.ShowEmptyLibrary||state.ShowNoSelection||state.Key is "blocked-by-another-mod" or "blocked-by-old-recorder" or "setup-needs-attention"?Visibility.Collapsed:Visibility.Visible;
+        BlockerCheckAgainLink.Visibility=state.Key is "blocked-by-another-mod" or "blocked-by-old-recorder"?Visibility.Visible:Visibility.Collapsed;
         AntiCheatOverrideButton.Visibility=state.Key is "anticheat-running" or "anticheat-files" or "anticheat-with-copy"?Visibility.Visible:Visibility.Collapsed;AntiCheatOverrideButton.IsEnabled=!busy;
         AntiCheatOverrideButton.Content=state.Key=="anticheat-with-copy"?"Keep using the driver copy anyway…":"Use Arc Cache with this game anyway…";
         var accepted=selected is null?null:overrides?.Get(selected.Key);
