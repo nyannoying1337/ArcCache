@@ -44,6 +44,8 @@ class CacheMonitor : Form {
     readonly string executable,root,log,displayName;readonly CacheSnapshot initial;readonly Timer timer=new Timer();int gamePid;DateTime started;int sampleCount;string driverStatus="Driver: not checked";string observedModulePath;readonly Func<string,string> inspectDriver;readonly string cacheFile;readonly long limitBytes,expectedBytes;readonly int limitMiB;readonly string corner;readonly DateTime monitorStarted=DateTime.Now;
     // The last sample, drawn by OnPaint. The status also goes to the window title for screen readers.
     OverlayTone tone=OverlayTone.Wait;string status="Checking the driver…",fileSize,growthText,footer="";long fileBytes=-1;bool loggingFailed;float scale=1;
+    // Frame times when SCSKiller's recorder is in the game's folder; else the samples in which the cache file grew.
+    internal StutterFeed feed;readonly List<KeyValuePair<DateTime,long>> growthMarks=new List<KeyValuePair<DateTime,long>>();long lastFileBytes=-1;bool showingFrames;
     struct Rect {public int Left,Top,Right,Bottom;}
     [DllImport("user32.dll")]static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")]static extern uint GetWindowThreadProcessId(IntPtr window,out uint pid);
@@ -73,7 +75,8 @@ class CacheMonitor : Form {
         File.WriteAllText(log,"utc,pid,shared_intel_bytes,net_growth_bytes,changed_files,unreadable_files,private_bytes,working_set_bytes\r\n");
         using(var g=CreateGraphics())scale=Math.Max(1f,g.DpiX/96f);
         FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;TopMost=true;BackColor=Panel;Opacity=0.92;DoubleBuffered=true;Text="Arc Cache";
-        ClientSize=new Size(S(296),S(150));
+        ReadAccent();feed=new StutterFeed(Path.GetDirectoryName(executable),new DateTimeOffset(started.ToUniversalTime()).ToUnixTimeMilliseconds()-5000);
+        ClientSize=new Size(S(296),HeightFor(false));
         timer.Interval=2000;timer.Tick+=delegate{Sample();};Shown+=delegate{Sample();timer.Start();};FormClosed+=delegate{timer.Dispose();};
     }
     protected override void OnHandleCreated(EventArgs e){
@@ -82,10 +85,22 @@ class CacheMonitor : Form {
         int round=2;try{DwmSetWindowAttribute(Handle,33,ref round,sizeof(int));}catch(DllNotFoundException){}catch(EntryPointNotFoundException){}
     }
     int S(float v){return (int)Math.Round(v*scale);}
-    static readonly Color Panel=Color.FromArgb(22,25,31),Text1=Color.FromArgb(242,244,247),Text2=Color.FromArgb(154,164,176),Text3=Color.FromArgb(127,137,148),Accent=Color.FromArgb(54,191,245),Track=Color.FromArgb(52,55,61);
+    // WinUI's dark theme: its card, text and status colours, and the Windows accent colour's lighter shades, as WinUI
+    // uses them on dark backgrounds (AccentPalette: Light3, Light2, Light1, Accent, ... as RGBA).
+    static readonly Color Panel=Color.FromArgb(32,32,32),Text1=Color.FromArgb(255,255,255),Text2=Color.FromArgb(204,204,204),Text3=Color.FromArgb(150,150,150),Track=Color.FromArgb(61,61,61),
+        Critical=Color.FromArgb(255,153,164),OtherHitch=Color.FromArgb(160,160,160);
+    Color accent=Color.FromArgb(76,194,255),accentLight=Color.FromArgb(153,235,255);
+    void ReadAccent(){
+        try{
+            var palette=Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Accent","AccentPalette",null) as byte[];
+            if(palette!=null&&palette.Length>=8){accent=Color.FromArgb(palette[4],palette[5],palette[6]);accentLight=Color.FromArgb(palette[0],palette[1],palette[2]);}
+        }catch(System.Security.SecurityException){}catch(IOException){}catch(UnauthorizedAccessException){}
+    }
     static Color Mix(Color c,double a){return Color.FromArgb((int)(Panel.R+(c.R-Panel.R)*a),(int)(Panel.G+(c.G-Panel.G)*a),(int)(Panel.B+(c.B-Panel.B)*a));}
-    static Color ToneColor(OverlayTone t){return t==OverlayTone.Good?Color.FromArgb(60,207,134):t==OverlayTone.Warn?Color.FromArgb(240,165,48):Color.FromArgb(111,168,255);}
-    static Color ToneText(OverlayTone t){return t==OverlayTone.Good?Color.FromArgb(127,225,174):t==OverlayTone.Warn?Color.FromArgb(255,196,107):Color.FromArgb(156,195,255);}
+    Color ToneColor(OverlayTone t){return t==OverlayTone.Good?Color.FromArgb(108,203,95):t==OverlayTone.Warn?Color.FromArgb(252,225,0):t==OverlayTone.Info?accent:Text3;}
+    // Segoe UI Variable (Windows 11) where installed, else Segoe UI: a missing family would fall back to Microsoft Sans Serif.
+    static string Family(string variable,string classic){try{using(new FontFamily(variable))return variable;}catch(ArgumentException){return classic;}}
+    static readonly string TextFamily=Family("Segoe UI Variable Text","Segoe UI"),BoldFamily=Family("Segoe UI Variable Text Semibold","Segoe UI Semibold"),SmallFamily=Family("Segoe UI Variable Small","Segoe UI");
     static System.Drawing.Drawing2D.GraphicsPath Rounded(RectangleF r,float radius){
         var path=new System.Drawing.Drawing2D.GraphicsPath();float d=radius*2;
         if(d<=0||d>r.Height||d>r.Width){path.AddRectangle(r);return path;}
@@ -95,20 +110,20 @@ class CacheMonitor : Form {
     void Draw(Graphics g,int width,int height){
         g.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         g.Clear(Panel);float pad=S(12),x=pad,w=width-pad*2,y=S(11);const TextFormatFlags Line=TextFormatFlags.NoPadding|TextFormatFlags.SingleLine|TextFormatFlags.EndEllipsis;
-        using(var title=new Font("Segoe UI Semibold",9.5f))using(var small=new Font("Segoe UI",8.25f))using(var smallBold=new Font("Segoe UI Semibold",8.25f))using(var tiny=new Font("Segoe UI",7.5f)){
+        using(var title=new Font(BoldFamily,9.5f))using(var small=new Font(TextFamily,8.25f))using(var smallBold=new Font(BoldFamily,8.25f))using(var tiny=new Font(SmallFamily,7.5f)){
             // Header: bolt, game name, cache size chip.
             float icon=S(12);var bolt=new[]{new PointF(x+icon*0.58f,y),new PointF(x+icon*0.12f,y+icon*0.6f),new PointF(x+icon*0.46f,y+icon*0.6f),new PointF(x+icon*0.38f,y+icon*1.05f),new PointF(x+icon*0.86f,y+icon*0.4f),new PointF(x+icon*0.52f,y+icon*0.4f)};
-            using(var b=new SolidBrush(Accent))g.FillPolygon(b,bolt);
+            using(var b=new SolidBrush(accent))g.FillPolygon(b,bolt);
             string chip=limitMiB<=512?"Default":Limit(limitMiB)+" copy";var chipText=TextRenderer.MeasureText(g,chip,smallBold,Size.Empty,TextFormatFlags.NoPadding);
             var chipRect=new RectangleF(x+w-chipText.Width-S(12),y-S(2),chipText.Width+S(12),chipText.Height+S(3));
-            using(var path=Rounded(chipRect,S(5)))using(var b=new SolidBrush(Mix(Color.White,0.09)))g.FillPath(b,path);
-            TextRenderer.DrawText(g,chip,smallBold,Rectangle.Round(chipRect),Color.FromArgb(185,194,204),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.NoPadding);
+            using(var path=Rounded(chipRect,S(4)))using(var b=new SolidBrush(Mix(Color.White,0.08)))g.FillPath(b,path);
+            TextRenderer.DrawText(g,chip,smallBold,Rectangle.Round(chipRect),Text2,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.NoPadding);
             TextRenderer.DrawText(g,displayName,title,new Rectangle((int)(x+icon+S(6)),(int)y-S(3),(int)(chipRect.X-x-icon-S(12)),S(20)),Text1,Line);
             // Status pill.
             y+=S(23);var pill=new RectangleF(x,y,w,S(22));
-            using(var path=Rounded(pill,S(6)))using(var b=new SolidBrush(Mix(ToneColor(tone),0.18)))g.FillPath(b,path);
+            using(var path=Rounded(pill,S(4)))using(var b=new SolidBrush(Mix(ToneColor(tone),0.16)))g.FillPath(b,path);
             using(var b=new SolidBrush(ToneColor(tone)))g.FillEllipse(b,x+S(8),y+S(7.5f),S(7),S(7));
-            TextRenderer.DrawText(g,status,smallBold,new Rectangle((int)(x+S(21)),(int)y,(int)(w-S(25)),(int)pill.Height),ToneText(tone),Line|TextFormatFlags.VerticalCenter);
+            TextRenderer.DrawText(g,status,smallBold,new Rectangle((int)(x+S(21)),(int)y,(int)(w-S(25)),(int)pill.Height),tone==OverlayTone.Wait?Text2:ToneColor(tone),Line|TextFormatFlags.VerticalCenter);
             // Cache file row: name left, "528 MB / 16 GB" right.
             y+=S(31);TextRenderer.DrawText(g,"Cache file",small,new Point((int)x,(int)y),Text2,TextFormatFlags.NoPadding);
             string ofLimit=" / "+Limit(limitMiB);var ofSize=TextRenderer.MeasureText(g,ofLimit,small,Size.Empty,TextFormatFlags.NoPadding);
@@ -119,18 +134,61 @@ class CacheMonitor : Form {
             y+=S(18);var track=new RectangleF(x,y,w,S(6));
             using(var path=Rounded(track,S(3)))using(var b=new SolidBrush(Track))g.FillPath(b,path);
             if(fileBytes>0){float fill=(float)Math.Min(1,fileBytes/(double)limitBytes);var bar=new RectangleF(x,y,Math.Max(S(6),w*fill),S(6));bool warn=tone==OverlayTone.Warn;
-                using(var path=Rounded(bar,S(3)))using(var b=new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(x,y,w,S(6)),warn?Color.FromArgb(224,154,44):Color.FromArgb(54,183,240),warn?Color.FromArgb(255,196,107):Color.FromArgb(95,208,255),0f))g.FillPath(b,path);}
+                using(var path=Rounded(bar,S(3)))using(var b=new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(x,y,w,S(6)),warn?Color.FromArgb(222,198,0):accent,warn?Color.FromArgb(255,236,110):accentLight,0f))g.FillPath(b,path);}
             bool marker=expectedBytes>0&&expectedBytes<limitBytes;
-            if(marker){float mx=x+w*(float)(expectedBytes/(double)limitBytes);using(var b=new SolidBrush(Color.FromArgb(214,221,229)))g.FillRectangle(b,mx-S(1),y-S(3),Math.Max(1,S(2)),S(12));}
+            if(marker){float mx=x+w*(float)(expectedBytes/(double)limitBytes);using(var b=new SolidBrush(Color.FromArgb(220,220,220)))g.FillRectangle(b,mx-S(1),y-S(3),Math.Max(1,S(2)),S(12));}
             y+=S(11);TextRenderer.DrawText(g,growthText??"",tiny,new Point((int)x,(int)y),Text3,TextFormatFlags.NoPadding);
             string right=marker?"tick: "+Amount(expectedBytes)+" expected":fileBytes>0?(fileBytes*100.0/limitBytes).ToString("0",CultureInfo.InvariantCulture)+"%":"";
             var rightSize=TextRenderer.MeasureText(g,right,tiny,Size.Empty,TextFormatFlags.NoPadding);TextRenderer.DrawText(g,right,tiny,new Point((int)(x+w-rightSize.Width),(int)y),Text3,TextFormatFlags.NoPadding);
+            y+=S(18);
+            if(feed!=null&&feed.Active)DrawFrames(g,x,y,w,tiny);else DrawGrowth(g,x,y,w,tiny);
             // Footer.
-            y+=S(19);using(var p=new Pen(Mix(Color.White,0.07)))g.DrawLine(p,x,y,x+w,y);
+            y=height-S(33);using(var p=new Pen(Mix(Color.White,0.07)))g.DrawLine(p,x,y,x+w,y);
             TextRenderer.DrawText(g,footer,tiny,new Rectangle((int)x,(int)y+S(6),(int)w,S(14)),Text3,Line);
         }
     }
-    internal Bitmap PreviewImage(){Sample();var image=new Bitmap(ClientSize.Width,ClientSize.Height);using(var g=Graphics.FromImage(image))Draw(g,image.Width,image.Height);return image;}
+    const TextFormatFlags Tight=TextFormatFlags.NoPadding|TextFormatFlags.SingleLine;
+    void SectionTitle(Graphics g,float x,float y,float w,Font font,string left,string right,Color rightColor){
+        TextRenderer.DrawText(g,left,font,new Point((int)x,(int)y),Text2,Tight);
+        var size=TextRenderer.MeasureText(g,right,font,Size.Empty,Tight);TextRenderer.DrawText(g,right,font,new Point((int)(x+w-size.Width),(int)y),rightColor,Tight);
+    }
+    // SCSKiller's recorder: the last 60 s of frame times (each column the slowest frame in it), a dashed line at 50 ms,
+    // and a dot on every slow frame, red where a shader compile caused it.
+    void DrawFrames(Graphics g,float x,float y,float w,Font tiny){
+        string right=feed.ShaderStutters==0?"No shader stutters yet":feed.ShaderStutters+(feed.ShaderStutters==1?" shader stutter":" shader stutters")+" · worst "+feed.WorstMs.ToString("0",CultureInfo.InvariantCulture)+" ms";
+        SectionTitle(g,x,y,w,tiny,"Last 60 s"+(feed.Fps>0?" · "+feed.Fps.ToString("0",CultureInfo.InvariantCulture)+" fps":""),right,feed.ShaderStutters==0?Text3:Critical);
+        y+=S(15);float h=S(GraphHeight);var box=new RectangleF(x,y,w,h);
+        using(var path=Rounded(box,S(4)))using(var b=new SolidBrush(Mix(Color.Black,0.35)))g.FillPath(b,path);
+        const double Top=150;Func<double,float> Y=delegate(double ms){return y+h-S(2)-(float)(Math.Min(ms,Top)/Top)*(h-S(6));};
+        using(var dash=new Pen(Mix(Color.White,0.2)){DashPattern=new[]{3f,3f}})g.DrawLine(dash,x,Y(StutterFeed.HitchMs),x+w,Y(StutterFeed.HitchMs));
+        var label=TextRenderer.MeasureText(g,"50 ms",tiny,Size.Empty,Tight);TextRenderer.DrawText(g,"50 ms",tiny,new Point((int)(x+S(4)),(int)(Y(StutterFeed.HitchMs)-label.Height-S(1))),Text3,Tight);
+        double[] columns=feed.Columns(120);var points=new List<PointF>();
+        using(var pen=new Pen(accent,Math.Max(1f,scale*1.4f)){LineJoin=System.Drawing.Drawing2D.LineJoin.Round}){
+            for(int i=0;i<=columns.Length;i++){
+                if(i<columns.Length&&columns[i]>=0){points.Add(new PointF(x+w*i/(columns.Length-1),Y(columns[i])));continue;}
+                if(points.Count>1)g.DrawLines(pen,points.ToArray());points.Clear();
+            }
+        }
+        foreach(var hitch in feed.Recent()){
+            float hx=x+w*(float)hitch.Position,r=S(2.5f);
+            using(var b=new SolidBrush(hitch.Shader?Critical:OtherHitch))g.FillEllipse(b,hx-r,Y(hitch.Ms)-r,r*2,r*2);
+        }
+    }
+    // Without the recorder: a mark for every sample in the last 60 s in which the game's cache file grew (new shaders).
+    void DrawGrowth(Graphics g,float x,float y,float w,Font tiny){
+        DateTime now=DateTime.UtcNow;long grew=0;foreach(var e in growthMarks)if((now-e.Key).TotalSeconds<=60)grew+=e.Value;
+        SectionTitle(g,x,y,w,tiny,"Cache growth · last 60 s",grew>0?"+"+Amount(grew):"No new shaders",grew>0?ToneColor(OverlayTone.Warn):Text3);
+        y+=S(15);float h=S(StripHeight);var box=new RectangleF(x,y,w,h);
+        using(var path=Rounded(box,S(4)))using(var b=new SolidBrush(Mix(Color.Black,0.35)))g.FillPath(b,path);
+        using(var b=new SolidBrush(ToneColor(OverlayTone.Warn)))foreach(var e in growthMarks){
+            double age=(now-e.Key).TotalSeconds;if(age>60)continue;
+            float mx=x+S(3)+(w-S(6))*(float)(1-age/60);g.FillRectangle(b,mx-S(1),y+S(4),Math.Max(1,S(2)),h-S(8));
+        }
+    }
+    const float GraphHeight=46,StripHeight=18;
+    // The footer sits 10 px under the graph or strip: 170 px of card around it.
+    internal int HeightFor(bool frames){return S(170+(frames?GraphHeight:StripHeight));}
+    internal Bitmap PreviewImage(){Sample();ClientSize=new Size(S(296),HeightFor(feed!=null&&feed.Active));var image=new Bitmap(ClientSize.Width,ClientSize.Height);using(var g=Graphics.FromImage(image))Draw(g,image.Width,image.Height);return image;}
     internal string StatusText {get{return status;}}
     // The file the game has open, else the saved link, else the file that grew most since the overlay started.
     string CacheName(CacheSnapshot now) {
@@ -181,6 +239,9 @@ class CacheMonitor : Form {
         try{using(var p=Process.GetProcessById(gamePid)){if(p.HasExited||p.StartTime!=started){Close();return;}privateBytes=p.PrivateMemorySize64;workingSet=p.WorkingSet64;
             if(sampleCount++%5==0){bool found=false;try{foreach(ProcessModule m in p.Modules)if((m.ModuleName.Equals("igd12um64xe2.dll",StringComparison.OrdinalIgnoreCase)||m.ModuleName.Equals("igd12um64xe3.dll",StringComparison.OrdinalIgnoreCase)||m.ModuleName.Equals("igd12um64xeh.dll",StringComparison.OrdinalIgnoreCase))){found=true;string path=m.FileName;if(path==observedModulePath)break;observedModulePath=path;driverStatus=path.StartsWith(executable+".local\\",StringComparison.OrdinalIgnoreCase)?"Game setup: custom copy loaded":"Game setup: normal or other copy loaded";if(inspectDriver!=null){try{driverStatus+=" · "+inspectDriver(path);}catch{driverStatus+=" · size not checked";}}break;}if(!found){driverStatus="Game setup: not confirmed";observedModulePath=null;}}catch{driverStatus="Game setup: could not be checked";observedModulePath=null;}}
         }}catch{Close();return;}
+        if(sampleCount%15==0)ReadAccent();
+        try{feed.Update();}catch(IOException){}catch(UnauthorizedAccessException){}
+        if(feed.Active!=showingFrames){showingFrames=feed.Active;ClientSize=new Size(S(296),HeightFor(showingFrames));}
         IntPtr front=GetForegroundWindow();uint foregroundPid;GetWindowThreadProcessId(front,out foregroundPid);Rect rect;
         // Borderless games often make their own window topmost after the overlay opened (auto-start opens it at launch),
         // which buries the overlay: put it back on top each sample, without moving, sizing or activating it.
@@ -189,12 +250,148 @@ class CacheMonitor : Form {
         if(sampleCount%5==1)try{DetectOpenFile(now);}catch(Exception){}
         string name=CacheName(now);long size;
         if(name!=null&&now.Sizes.TryGetValue(name,out size)){long before;long grewSince=size-(initial.Sizes.TryGetValue(name,out before)?before:0);fileBytes=size;fileSize=Amount(size);
+            if(lastFileBytes>=0&&size>lastFileBytes)growthMarks.Add(new KeyValuePair<DateTime,long>(DateTime.UtcNow,size-lastFileBytes));lastFileBytes=size;
+            growthMarks.RemoveAll(delegate(KeyValuePair<DateTime,long> e){return (DateTime.UtcNow-e.Key).TotalSeconds>60;});
             growthText=(grewSince>=0?"+":"-")+Amount(Math.Abs(grewSince))+" this session"+(ActiveFile==null?" · likely file":"");Verdict(now,name,size,grewSince);}
         else{fileBytes=-1;fileSize=null;growthText=name==null?"No file grew yet":"File not found";Verdict(now,null,0,0);}
-        footer="RAM "+Amount(workingSet)+" · all Intel caches "+Amount(now.Bytes)+(now.Unreadable>0?" · "+now.Unreadable+" unreadable":"")+(loggingFailed?" · log unavailable":"");
+        footer="RAM "+Amount(workingSet)+(showingFrames?" · frame times from SCSKiller's recorder":" · no frame times: SCSKiller's recorder is off")+(now.Unreadable>0?" · "+now.Unreadable+" unreadable":"")+(loggingFailed?" · log unavailable":"");
         Text="Arc Cache · "+displayName+" · "+status;
         try{File.AppendAllText(log,DateTime.UtcNow.ToString("o")+","+gamePid+","+now.Bytes+","+growth+","+changed+","+now.Unreadable+","+privateBytes+","+workingSet+"\r\n");loggingFailed=false;}catch(IOException){loggingFailed=true;}catch(UnauthorizedAccessException){loggingFailed=true;}
         Invalidate();
+    }
+}
+
+// SCSKiller's recorder, read only: its frame times (scskiller_frames.bin) and shader creates (scskiller_creates.csv)
+// beside the game's exe, both timed in ms since the recorder loaded (SCSKiller ARCHITECTURE.md). Each sample reads what
+// was added since the last; the frames file holds one launch, replaced at that launch's first frame, so only a launch
+// stamped after the game started counts. A frame of 50 ms or more is classified 3 s after it ended (the recorder writes
+// once a second), like SCSKiller's FrameLog without its startup and quit windows:
+//   no create overlaps it and it took 5 s or more               -> a pause, not counted
+//   compiles on 8 threads or more overlap it, none presenting    -> loading
+//   compiles of 100 ms or more fill half of it                   -> shader stutter
+//   100 creates or more overlap it                               -> loading
+//   a compile of 10 ms or more overlaps it                       -> shader stutter
+//   else                                                         -> other hitch
+class StutterFeed {
+    public const double HitchMs=50;
+    const double WindowMs=60000,KeepMs=75000,SettleMs=3000;const long MaxCsvTail=4L<<20;
+    struct Create {public double Start,End,Ms;public long Tid;public bool Presents;}
+    public struct Hitch {public double End,Ms;public bool Shader;public double Position;}
+    readonly string framesPath,createsPath;readonly long notBeforeUnixMs;
+    long launchUnix,framesRead,createsRead,clockUs;double launchStartMs;bool inLaunch,createsCurrent;
+    readonly Dictionary<uint,List<double>> chains=new Dictionary<uint,List<double>>();readonly Dictionary<uint,long> chainCounts=new Dictionary<uint,long>();
+    readonly List<Create> creates=new List<Create>();readonly List<Hitch> hitches=new List<Hitch>();double classifiedTo,latest;
+    public bool Active {get;private set;}
+    public int ShaderStutters {get;private set;}
+    public double WorstMs {get;private set;}
+    public double Fps {get;private set;}
+    public StutterFeed(string gameFolder,long notBeforeUnixMs){framesPath=Path.Combine(gameFolder,"scskiller_frames.bin");createsPath=Path.Combine(gameFolder,"scskiller_creates.csv");this.notBeforeUnixMs=notBeforeUnixMs;}
+    void Reset(long unix){
+        launchUnix=unix;framesRead=0;createsRead=0;clockUs=0;launchStartMs=0;inLaunch=false;createsCurrent=false;chains.Clear();chainCounts.Clear();creates.Clear();hitches.Clear();
+        classifiedTo=0;latest=0;ShaderStutters=0;WorstMs=0;Fps=0;Active=false;
+    }
+    public void Update(){
+        if(!File.Exists(framesPath)){if(launchUnix!=0)Reset(0);return;}
+        using(var f=new FileStream(framesPath,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete)){
+            long length=f.Length;if(length<36){if(launchUnix!=0)Reset(0);return;}
+            var head=new byte[36];if(Fill(f,head,36)<36)return;
+            if(BitConverter.ToUInt32(head,0)!=0xFFFFFFFF){if(launchUnix!=0)Reset(0);return;}
+            long unix=BitConverter.ToInt64(head,4);
+            if(unix!=launchUnix||length<framesRead)Reset(unix);
+            if(unix<notBeforeUnixMs)return; // an earlier run's file: the recorder hasn't seen a frame of this one yet
+            f.Position=framesRead;int count=(int)Math.Min(length-framesRead,16L<<20)&~3;var data=new byte[count];count=Fill(f,data,count)&~3;
+            framesRead+=ReadFrames(data,count);
+        }
+        if(!inLaunch)return;
+        ReadCreates();
+        List<double> main=MainChain();if(main==null||main.Count<2)return;
+        latest=main[main.Count-1];Active=true;
+        Classify(main);
+        int first=main.FindIndex(delegate(double t){return t>=latest-5000;});Fps=first>=0&&latest-main[first]>0?(main.Count-1-first)*1000.0/(latest-main[first]):0;
+        foreach(var chain in chains.Values)chain.RemoveAll(delegate(double t){return t<latest-KeepMs;});
+        creates.RemoveAll(delegate(Create c){return c.End<latest-KeepMs;});hitches.RemoveAll(delegate(Hitch h){return h.End<latest-KeepMs;});
+    }
+    static int Fill(Stream s,byte[] buffer,int count){int read=0;while(read<count){int n=s.Read(buffer,read,count-read);if(n<=0)break;read+=n;}return read;}
+    // u32 records: 0xFFFFFFFF + u64 unix ms, u64 us since the recorder loaded, u64 QPC, u64 QPC frequency opens a launch;
+    // top 4 bits 0-14 a frame of that swap chain after the low 28 bits' microseconds; 15 = that many ms without a frame.
+    // Returns the bytes used: a launch record cut off at the end is read next time.
+    long ReadFrames(byte[] data,int count){
+        int i=0;
+        for(;i+4<=count;i+=4){
+            uint r=BitConverter.ToUInt32(data,i);
+            if(r==0xFFFFFFFF){if(i+36>count)break;launchStartMs=BitConverter.ToInt64(data,i+12)/1000.0;clockUs=0;inLaunch=true;chains.Clear();chainCounts.Clear();i+=32;continue;}
+            if(!inLaunch)continue;
+            if(r>>28==15){clockUs+=(r&0x0FFFFFFF)*1000L;continue;}
+            clockUs+=r&0x0FFFFFFF;uint chain=r>>28;List<double> list;
+            if(!chains.TryGetValue(chain,out list)){chains[chain]=list=new List<double>();chainCounts[chain]=0;}
+            list.Add(launchStartMs+clockUs/1000.0);chainCounts[chain]++;
+        }
+        return i;
+    }
+    List<double> MainChain(){List<double> best=null;long most=0;foreach(var pair in chainCounts)if(pair.Value>most){most=pair.Value;best=chains[pair.Key];}return best;}
+    // Rows t_ms,kind,known,tuple_known,ms,key,proxy_ms,tid,presents of the launch whose #session carries the frames' stamp.
+    void ReadCreates(){
+        if(!File.Exists(createsPath))return;
+        using(var f=new FileStream(createsPath,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete)){
+            long length=f.Length;if(length<createsRead){createsRead=0;createsCurrent=false;creates.Clear();}
+            bool midLine=false;if(createsRead==0&&length>MaxCsvTail){createsRead=length-MaxCsvTail;midLine=true;} // a long csv: its tail, from the next line
+            f.Position=createsRead;var data=new byte[(int)Math.Min(length-createsRead,MaxCsvTail)];int count=Fill(f,data,data.Length);
+            int end=Array.LastIndexOf(data,(byte)'\n',Math.Max(0,count-1));if(count==0||end<0)return;
+            int start=midLine?Array.IndexOf(data,(byte)'\n')+1:0;
+            createsRead+=end+1;
+            foreach(string raw in System.Text.Encoding.UTF8.GetString(data,start,Math.Max(0,end+1-start)).Split('\n')){
+                string line=raw.TrimEnd('\r');if(line.Length==0)continue;string[] p=line.Split(',');
+                if(line[0]=='#'){
+                    long stamp;
+                    if(p[0]=="#session")createsCurrent=p.Length>1&&long.TryParse(p[1],NumberStyles.Integer,CultureInfo.InvariantCulture,out stamp)&&stamp==launchUnix;
+                    else if(p[0]=="#end")createsCurrent=false;
+                    continue;
+                }
+                double t,ms;long tid=0;
+                if(!createsCurrent||p.Length<5||!double.TryParse(p[0],NumberStyles.Float,CultureInfo.InvariantCulture,out t)||!double.TryParse(p[4],NumberStyles.Float,CultureInfo.InvariantCulture,out ms))continue;
+                if(p.Length>7)long.TryParse(p[7],NumberStyles.Integer,CultureInfo.InvariantCulture,out tid);
+                creates.Add(new Create{Start=t-ms,End=t,Ms=ms,Tid=tid,Presents=p.Length>8&&p[8]=="1"});
+            }
+        }
+    }
+    void Classify(List<double> main){
+        double until=latest-SettleMs;
+        for(int i=1;i<main.Count;i++){
+            double end=main[i],ms=end-main[i-1];if(end<=classifiedTo||end>until||ms<HitchMs)continue;
+            bool? shader=Cause(end-ms,end,ms);if(shader==null)continue;
+            hitches.Add(new Hitch{End=end,Ms=ms,Shader=shader.Value});
+            if(shader.Value){ShaderStutters++;if(ms>WorstMs)WorstMs=ms;}
+        }
+        if(until>classifiedTo)classifiedTo=until;
+    }
+    bool? Cause(double start,double end,double ms){
+        int overlapping=0;bool compile=false,presenting=false;double cold=0;var threads=new HashSet<long>();
+        foreach(var c in creates){
+            if(c.End<=start||c.Start>=end)continue;overlapping++;
+            if(c.Ms>=10){compile=true;threads.Add(c.Tid);if(c.Presents)presenting=true;}
+            if(c.Ms>=100)cold+=Math.Min(c.End,end)-Math.Max(c.Start,start);
+        }
+        if(overlapping==0&&ms>=5000)return null;
+        if(threads.Count>=8&&!presenting)return false;
+        if(cold>=ms/2)return true;
+        if(overlapping>=100)return false;
+        return compile;
+    }
+    /// <summary>The slowest frame per column over the last 60 s, oldest first; -1 = no frame ended in that column.</summary>
+    public double[] Columns(int n){
+        var result=new double[n];for(int i=0;i<n;i++)result[i]=-1;
+        List<double> main=MainChain();if(main==null)return result;
+        for(int i=1;i<main.Count;i++){
+            double age=latest-main[i];if(age>WindowMs)continue;
+            int column=Math.Min(n-1,(int)((1-age/WindowMs)*(n-1)+0.5));double ms=main[i]-main[i-1];if(ms>result[column])result[column]=ms;
+        }
+        return result;
+    }
+    /// <summary>The classified slow frames of the last 60 s, Position 0 (oldest) to 1 (newest).</summary>
+    public List<Hitch> Recent(){
+        var result=new List<Hitch>();
+        foreach(var h in hitches){double age=latest-h.End;if(age>WindowMs)continue;var copy=h;copy.Position=1-age/WindowMs;result.Add(copy);}
+        return result;
     }
 }
 
