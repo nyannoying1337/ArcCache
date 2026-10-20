@@ -32,15 +32,26 @@ public static class Isolation {
         } finally {FreeLibrary(m);}
     }
     public static bool DotLocalCandidate(bool hasManifest,bool developerOverride) {return !hasManifest||developerOverride;}
+    // SCSKiller's recorder is a d3d12.dll proxy. With the game's .local folder the loader matches DLLs by base name, so an
+    // older recorder gets itself back for the System32 d3d12.dll and refuses to start: the game can't load DirectX (PEAK
+    // crashed). A recorder marked "exe.local-aware" in its version information loads a renamed copy of Windows' d3d12.dll
+    // instead, and the Intel driver still comes from the .local copy (measured with a test exe and a game's .local
+    // folder). That one doesn't block a setup; any other game-local d3d12.dll or dxgi.dll does, and so does a mod the
+    // recorder chains to (renamed d3d12.scskiller-next.dll).
+    public static bool DotLocalAwareRecorder(string path) {
+        if(!File.Exists(path))return false;
+        var v=System.Diagnostics.FileVersionInfo.GetVersionInfo(path);
+        return v.ProductName=="SCSKiller"&&v.FileDescription=="SCSKiller D3D12 proxy"&&v.Comments=="exe.local-aware";
+    }
     public static string LocalD3D12(string executable) {
         string candidate=Path.Combine(Path.GetDirectoryName(Path.GetFullPath(executable)),"d3d12.dll");
-        return File.Exists(candidate)?candidate:null;
+        return File.Exists(candidate)&&!DotLocalAwareRecorder(candidate)?candidate:null;
     }
     public static string LocalDirectXProxy(string executable) {
         string directory=Path.GetDirectoryName(Path.GetFullPath(executable));
-        foreach(string name in new[]{"d3d12.dll","dxgi.dll"}) {
+        foreach(string name in new[]{"d3d12.dll","dxgi.dll","d3d12.scskiller-next.dll"}) {
             string candidate=Path.Combine(directory,name);
-            if(File.Exists(candidate))return candidate;
+            if(File.Exists(candidate)&&!(name=="d3d12.dll"&&DotLocalAwareRecorder(candidate)))return candidate;
         }
         return null;
     }

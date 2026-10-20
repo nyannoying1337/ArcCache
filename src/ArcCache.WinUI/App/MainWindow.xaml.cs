@@ -1398,35 +1398,37 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
         if(selected?.Source=="Steam")RenderScsDetails(DetailsFor(selected));
         RenderScsRecorder();
     }
-    // Frame-time graph: SCSKiller's recorder (a d3d12.dll) in the game's folder, read from the folder itself. It can't run
-    // beside a driver copy: with exe.local, Windows hands the recorder itself back for the System32 d3d12.dll it loads,
-    // and it refuses to start, so the game can't load DirectX (PEAK crashed on start). First match:
-    //   no SCSKiller selected      -> off, disabled  "Choose SCSKiller in Settings first."
-    //   not a Steam game           -> off, disabled  "Only for Steam games."
-    //   game folder unknown        -> off, disabled  "Start the game once in DirectX 12 so Arc Cache can find its folder."
-    //   a step is running          -> as is, disabled "Wait for the current step to finish."
-    //   game running               -> as is, disabled "Close the game to change this."
-    //   driver copy, recorder in   -> on, enabled    "…stops the game from starting. Turn this off."
-    //   driver copy                -> off, disabled  "Can't be used while this game has a driver copy…"
-    //   installed / not            -> on / off       what it does
+    // Frame-time graph: SCSKiller's recorder (a d3d12.dll) in the game's folder, read from the folder itself. Beside a
+    // driver copy (exe.local) only an "exe.local-aware" recorder runs: an older one gets itself back for Windows' d3d12.dll
+    // and the game can't load DirectX (PEAK crashed on start). First match:
+    //   no SCSKiller selected            -> off, disabled  "Choose SCSKiller in Settings first."
+    //   not a Steam game                 -> off, disabled  "Only for Steam games."
+    //   game folder unknown              -> off, disabled  "Start the game once in DirectX 12 so Arc Cache can find its folder."
+    //   a step is running                -> as is, disabled "Wait for the current step to finish."
+    //   game running                     -> as is, disabled "Close the game to change this."
+    //   driver copy, older recorder in   -> on, enabled    "…stops the game from starting. Turn this off."
+    //   driver copy, SCSKiller's older   -> off, disabled  "This SCSKiller's recorder can't run beside a driver copy…"
+    //   installed / not                  -> on / off       what it does
     bool scsRecorderRendering;
     const string RecorderUse="It gives on-screen stats their frame-time graph and notes the shaders the game creates for the next shader preparation.";
     static bool HasDriverCopy(string exe)=>Directory.Exists(exe+".local")||File.Exists(exe+".local");
     void RenderScsRecorder(){
         if(ScsRecorder==null)return;
         string? exe=selected?.SupportedExecutable;bool installed=ScsKillerBridge.RecorderInstalled(exe),running=exe!=null&&GameProcessRunning(exe),copy=exe!=null&&HasDriverCopy(exe);
+        bool brokenBesideCopy=copy&&installed&&!ScsKillerBridge.InstalledRecorderDotLocalAware(exe),sourceTooOld=copy&&!installed&&!ScsKillerBridge.IsDotLocalAware(scs?.RecorderSource());
         string? blocked=scs?.CliPath==null?"Choose SCSKiller in Settings first.":selected?.Source!="Steam"?"Only for Steam games.":exe==null?"Start the game once in DirectX 12 so Arc Cache can find its folder."
-            :busy||scsRunning?"Wait for the current step to finish.":running?"Close the game to change this.":copy&&!installed?"Can't be used while this game has a driver copy: Windows would load the recorder in place of DirectX, and the game wouldn't start.":null;
+            :busy||scsRunning?"Wait for the current step to finish.":running?"Close the game to change this."
+            :sourceTooOld?"This SCSKiller's recorder can't run beside this game's driver copy: the game wouldn't start. Arc Cache's own SCSKiller can.":null;
         scsRecorderRendering=true;try{ScsRecorder.IsOn=installed;}finally{scsRecorderRendering=false;}
         ScsRecorder.IsEnabled=blocked==null&&!developerMyGamesPreview;
-        ScsRecorderText.Text=blocked??(copy?"This game has a driver copy, so the recorder stops it from starting. Turn this off."
+        ScsRecorderText.Text=blocked??(brokenBesideCopy?"This recorder is too old for this game's driver copy and stops the game from starting. Turn this off."
             :installed?"SCSKiller's recorder is in this game's folder. "+RecorderUse:"Puts SCSKiller's recorder (a d3d12.dll) in this game's folder. "+RecorderUse);
     }
     async void ScsRecorderToggled(object sender,RoutedEventArgs e){
         if(scsRecorderRendering||selected is not SteamGame game||scs==null)return;
         bool install=ScsRecorder.IsOn;
-        if(busy||scsRunning||game.SupportedExecutable==null||install&&HasDriverCopy(game.SupportedExecutable)){RenderScsRecorder();return;}
-        if(install&&!await Confirm("Frame-time graph",$"Put SCSKiller's recorder in {game.Name}'s folder? It is a d3d12.dll that loads with the game and passes everything on to Windows' DirectX. SCSKiller refuses games with anti-cheat or another DirectX mod. While it is in, Arc Cache can't set up this game. Turning this off removes exactly the files it added.","Turn on")){RenderScsRecorder();return;}
+        if(busy||scsRunning||game.SupportedExecutable==null||install&&HasDriverCopy(game.SupportedExecutable)&&!ScsKillerBridge.IsDotLocalAware(scs.RecorderSource())){RenderScsRecorder();return;}
+        if(install&&!await Confirm("Frame-time graph",$"Put SCSKiller's recorder in {game.Name}'s folder? It is a d3d12.dll that loads with the game and passes everything on to Windows' DirectX. SCSKiller refuses games with anti-cheat or another DirectX mod. Turning this off removes exactly the files it added.","Turn on")){RenderScsRecorder();return;}
         await Run(install?$"Turning on recording for {game.Name}…":$"Turning off recording for {game.Name}…",async()=>{
             if(GameProcessRunning(game.SupportedExecutable))throw new InvalidOperationException("Close the game first.");
             var lines=new System.Collections.Concurrent.ConcurrentQueue<string>();

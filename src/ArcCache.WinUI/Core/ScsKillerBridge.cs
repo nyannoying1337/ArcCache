@@ -139,6 +139,21 @@ public sealed class ScsKillerBridge(string settingsPath) {
         if(!File.Exists(dll))return false;
         try{var v=FileVersionInfo.GetVersionInfo(dll);return v.ProductName=="SCSKiller"&&v.FileDescription=="SCSKiller D3D12 proxy";}catch(FileNotFoundException){return false;}
     }
+    /// <summary>A recorder that runs beside a game's driver copy (exe.local): "exe.local-aware" in its version information.
+    /// Older ones get themselves back for Windows' d3d12.dll there and the game can't start.</summary>
+    public static bool IsDotLocalAware(string? dll) {
+        if(dll==null||!IsRecorder(dll))return false;
+        try{return FileVersionInfo.GetVersionInfo(dll).Comments=="exe.local-aware";}catch(FileNotFoundException){return false;}
+    }
+    public static bool InstalledRecorderDotLocalAware(string? executable)=>executable!=null&&Path.GetDirectoryName(Path.GetFullPath(executable)) is string folder&&IsDotLocalAware(Path.Combine(folder,"d3d12.dll"));
+    /// <summary>The recorder the selected CLI installs, found as SCSKiller's NativeTools.Find does: native\ next to the
+    /// CLI, the CLI's folder, then native\ one folder up (Arc Cache's SCSKiller\cli and SCSKiller\native).</summary>
+    public string? RecorderSource() {
+        if(CliPath==null||Path.GetDirectoryName(Path.GetFullPath(CliPath)) is not string cli)return null;
+        foreach(string path in new[]{Path.Combine(cli,"native","d3d12.dll"),Path.Combine(cli,"d3d12.dll"),Path.GetFullPath(Path.Combine(cli,"..","native","d3d12.dll"))})
+            if(File.Exists(path))return path;
+        return null;
+    }
     public Task<int> RecorderAsync(uint appId,bool install,Action<string> progress,CancellationToken cancel)=>
         RunProcess(()=>RecorderCommand(CliPath!,appId,install),progress,cancel);
     public Task<int> RunAsync(string action,uint appId,Action<string> progress,CancellationToken cancel,PrivateDriverWarm? privateDriver=null)=>
