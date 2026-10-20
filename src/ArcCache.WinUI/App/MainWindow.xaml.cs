@@ -66,6 +66,17 @@ public partial class MainWindow : Window {
     MyGamesLoadResult gameLoadResult=MyGamesLoadResult.Unknown;
     LocalModBlocker? activeModBlocker;
     string? activeModBlockerGameKey;
+    // Mod blocks found per game this session: a block is found only while the game runs, so choosing another game and
+    // coming back must not forget it. Kept while the file is there (and, for SCSKiller's recorder, still the older kind).
+    readonly Dictionary<string,LocalModBlocker> knownBlockers=new();
+    void RestoreBlocker(SteamGame? game){
+        if(activeModBlocker is not null&&activeModBlockerGameKey is not null)knownBlockers[activeModBlockerGameKey]=activeModBlocker;
+        activeModBlocker=null;activeModBlockerGameKey=null;
+        if(game is null||!knownBlockers.TryGetValue(game.Key,out var known))return;
+        bool still=known.IsDirectory?Directory.Exists(known.Path):File.Exists(known.Path)&&!ScsKillerBridge.IsDotLocalAware(known.Path);
+        if(still){activeModBlocker=known;activeModBlockerGameKey=game.Key;}else knownBlockers.Remove(game.Key);
+    }
+    void ForgetBlocker(){if(activeModBlockerGameKey is not null)knownBlockers.Remove(activeModBlockerGameKey);activeModBlocker=null;activeModBlockerGameKey=null;}
     bool setupOperationRunning;
     int myGamesChangeStep;
     int selectedCacheMiB=512;
@@ -711,12 +722,12 @@ public partial class MainWindow : Window {
         switch(myGamesPageState?.AccentAction){case MyGamesAction.AddGame:AddManualGame(sender,e);break;case MyGamesAction.OpenGraphics:OpenGraphics(sender,e);break;case MyGamesAction.OpenGameFolder:OpenSelectedGameFolder();break;case MyGamesAction.UpdateRecorder:UpdateBlockingRecorder();break;case MyGamesAction.LaunchForDiscovery:LaunchGame(sender,e);break;case MyGamesAction.RestoreGame:RestoreGame(sender,e);break;case MyGamesAction.ChooseAnotherGame:GamesList.Focus(FocusState.Programmatic);break;case MyGamesAction.ReviewSetup:case MyGamesAction.ReviewSavedSetup:MyGamesAdvanced.IsExpanded=true;break;}
     }
     void OpenSelectedGameFolder(){if(selected is null)return;try{Process.Start(new ProcessStartInfo("explorer.exe"){UseShellExecute=true,ArgumentList={selected.InstallDirectory}});}catch(Exception e){Log("Could not open game folder: "+e.Message);}}
-    async void RecheckBlockedGame(object sender,RoutedEventArgs e){if(PreviewOnlyFeedback())return;activeModBlocker=null;activeModBlockerGameKey=null;discoveryTimer.Stop();await ShowGame();}
+    async void RecheckBlockedGame(object sender,RoutedEventArgs e){if(PreviewOnlyFeedback())return;ForgetBlocker();discoveryTimer.Stop();await ShowGame();}
     void StopGameCheck(object sender,RoutedEventArgs e){
         if(PreviewOnlyFeedback())return;discoveryTimer.Stop();gameLoadResult=MyGamesLoadResult.Failed;RenderMyGames();
     }
     async Task ShowGame() {
-        discoveryTimer.Stop();var game=selected;if(!string.Equals(observedRunningExe,game?.SupportedExecutable,StringComparison.OrdinalIgnoreCase))observedRunningExe=null;if(activeModBlockerGameKey!=game?.Key){activeModBlocker=null;activeModBlockerGameKey=null;}Details.Visibility=Visibility.Visible;if(game==null){GameTitle.Text="Choose a game";GameStatus.Text="Choose a game from the list.";UpdateButtons();RenderMyGames();RefreshHome();return;}
+        discoveryTimer.Stop();var game=selected;if(!string.Equals(observedRunningExe,game?.SupportedExecutable,StringComparison.OrdinalIgnoreCase))observedRunningExe=null;if(activeModBlockerGameKey!=game?.Key)RestoreBlocker(game);Details.Visibility=Visibility.Visible;if(game==null){GameTitle.Text="Choose a game";GameStatus.Text="Choose a game from the list.";UpdateButtons();RenderMyGames();RefreshHome();return;}
         if(!games.Any(g=>g.Key==game.Key)){
             GameTitle.Text=game.Name;GameSource.Text=game.Source.ToUpperInvariant()+" LIBRARY";setupState=null;recordValid=false;receiptValid=false;selectedReceipt=null;
             try{string receipt=store.Receipt(game);if(File.Exists(receipt))selectedReceipt=JsonSerializer.Deserialize<ReceiptState>(File.ReadAllText(receipt),new JsonSerializerOptions{PropertyNameCaseInsensitive=true});}catch(Exception error){Log("Saved setup could not be read: "+error.Message);}
@@ -790,7 +801,9 @@ public partial class MainWindow : Window {
             var request=new WorkerRequest("DiscoverGame",ReceiptPath:store.Receipt(game),SourceReceipt:successfulTrial,SteamAppId:game.AppId,InstallDirectory:game.InstallDirectory,ReadOnly:preview,LibrarySource:game.Source,ExternalId:game.ExternalId,SelectedExecutable:game.ManualExecutable);
             var reply=quiet?await safety.RunAsync(request):await Engine(request);if(!reply.Ok)throw new InvalidOperationException(reply.Message);
             if(selected?.Key!=game.Key)return false;
-            activeModBlocker=ReadBlocker(reply.Data);activeModBlockerGameKey=activeModBlocker is null?null:game.Key;
+            // A check without the game running sees no mod: it keeps a block found earlier. One that saw the game decides.
+            var replyBlocker=ReadBlocker(reply.Data);
+            if(replyBlocker is not null||reply.Data.GetProperty("Validated").GetBoolean()){activeModBlocker=replyBlocker;activeModBlockerGameKey=replyBlocker is null?null:game.Key;if(replyBlocker is null)knownBlockers.Remove(game.Key);}
         if(activeModBlocker is not null)discoveryTimer.Stop();
             bool found=reply.Data.GetProperty("Validated").GetBoolean();string? exe=reply.Data.GetProperty("Executable").GetString();
             discoveryMessage=reply.Data.GetProperty("Message").GetString()??"";bool trialProfileReady=reply.Data.TryGetProperty("TrialProfileReady",out var trialProfile)&&trialProfile.ValueKind==JsonValueKind.True;bool changed=game.Detected!=found||game.DetectedExecutable!=exe||game.TrialProfileReady!=trialProfileReady;
@@ -1438,7 +1451,7 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
             if(code!=0)throw new InvalidOperationException(lines.LastOrDefault(l=>l.Contains("error",StringComparison.OrdinalIgnoreCase))?.Replace("SCSKiller log: ","").Replace("SCSKiller: ","")??"SCSKiller could not replace the recorder.");
         });
         if(activeModBlocker?.Path is not string dll||!ScsKillerBridge.IsDotLocalAware(dll)){Log("The recorder in "+game.Name+"'s folder is still the older one.");return;}
-        activeModBlocker=null;activeModBlockerGameKey=null;await ShowGame();
+        ForgetBlocker();await ShowGame();
     }
     async void ScsRecorderToggled(object sender,RoutedEventArgs e){
         if(scsRecorderRendering||selected is not SteamGame game||scs==null)return;
