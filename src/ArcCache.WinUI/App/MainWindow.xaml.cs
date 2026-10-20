@@ -491,6 +491,7 @@ public partial class MainWindow : Window {
             if(TrialMode&&!game.TrialProfileReady) {
                 await DiscoverSelected(true);
                 if(selected?.Key==id&&selected.TrialProfileReady&&!busy)await ShowGame();
+                else if(activeModBlocker is not null&&selected?.Key==id&&!busy)RenderMyGames(); // blocked: polling stops, so show it now
             }else if(!game.Supported) {
                 if(await DiscoverSelected(true)&&selected?.Key==id&&!busy)await ShowGame();
                 else if(activeModBlocker is not null&&selected?.Key==id&&!busy)RenderMyGames();
