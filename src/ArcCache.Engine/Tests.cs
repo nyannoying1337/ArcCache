@@ -95,7 +95,11 @@ static class Tests {
         try {
             if(args.Length==1&&args[0]=="--isolation-proxy-tests"){
                 string root=Path.Combine(Path.GetTempPath(),"ArcCacheIsolationTests-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
-                try{string exe=Path.Combine(root,"game.exe");File.WriteAllText(exe,"fixture");foreach(string name in new[]{"d3d12.dll","dxgi.dll"}){string proxy=Path.Combine(root,name);File.WriteAllText(proxy,"fixture proxy");Check(Isolation.LocalDirectXProxy(exe)==proxy,"Failed to identify "+name);try{Isolation.RequireNoLocalD3D12(exe);throw new Exception("Accepted local "+name);}catch(InvalidDataException){}File.Delete(proxy);}string foreign=exe+".local";Directory.CreateDirectory(foreign);Check(Isolation.LocalPrivatePath(exe)==foreign,"Failed to identify foreign .local directory");Console.WriteLine("PASS d3d12.dll, dxgi.dll and foreign .local blockers; no game files accessed.");return 0;}
+                try{string exe=Path.Combine(root,"game.exe");File.WriteAllText(exe,"fixture");foreach(string name in new[]{"d3d12.dll","dxgi.dll","winhttp.dll","version.dll"}){string proxy=Path.Combine(root,name);File.WriteAllText(proxy,"fixture proxy");Check(Isolation.LocalDirectXProxy(exe)==proxy,"Failed to identify "+name);try{Isolation.RequireNoLocalD3D12(exe);throw new Exception("Accepted local "+name);}catch(InvalidDataException){}File.Delete(proxy);}
+                    // A game's own copy of a Microsoft runtime is that DLL, not a stand-in; a DLL no Windows DLL is named like isn't either.
+                    File.Copy(Path.Combine(Environment.SystemDirectory,"msvcp140.dll"),Path.Combine(root,"msvcp140.dll"));File.WriteAllText(Path.Combine(root,"steam_api64.dll"),"fixture");
+                    Check(Isolation.LocalDirectXProxy(exe)==null,"A game's Microsoft runtime copy or its own DLL was taken for a stand-in.");
+                    string foreign=exe+".local";Directory.CreateDirectory(foreign);Check(Isolation.LocalPrivatePath(exe)==foreign,"Failed to identify foreign .local directory");Console.WriteLine("PASS stand-ins for Windows DLLs (d3d12, dxgi, winhttp, version) and foreign .local blockers; runtime copies pass; no game files accessed.");return 0;}
                 finally{if(Directory.Exists(root))Directory.Delete(root,true);}
             }
             if(args.Length==2&&args[0]=="--planner"){

@@ -47,11 +47,25 @@ public static class Isolation {
         string candidate=Path.Combine(Path.GetDirectoryName(Path.GetFullPath(executable)),"d3d12.dll");
         return File.Exists(candidate)&&!DotLocalAwareRecorder(candidate)?candidate:null;
     }
+    // Not only DirectX mods: any DLL in the exe's folder named like one in System32 stands in for that Windows DLL (mod
+    // loaders use winhttp.dll, version.dll, winmm.dll, dinput8.dll...) and loads the real one from System32 by full path.
+    // With the .local folder that comes back as the proxy itself, so its forwarders call themselves: PEAK froze with two
+    // threads spinning in BepInEx Doorstop's winhttp.dll (each export a jmp through a pointer that was resolved to itself).
+    // d3d12.dll and dxgi.dll block whoever made them; other names unless Microsoft's (a game's own copy of a runtime
+    // such as msvcp140.dll or d3dcompiler_47.dll is the DLL itself, not a stand-in).
     public static string LocalDirectXProxy(string executable) {
-        string directory=Path.GetDirectoryName(Path.GetFullPath(executable));
-        foreach(string name in new[]{"d3d12.dll","dxgi.dll","d3d12.scskiller-next.dll"}) {
+        string directory=Path.GetDirectoryName(Path.GetFullPath(executable)),system=Environment.SystemDirectory;
+        string chained=Path.Combine(directory,"d3d12.scskiller-next.dll");if(File.Exists(chained))return chained;
+        foreach(string name in new[]{"d3d12.dll","dxgi.dll"}) {
             string candidate=Path.Combine(directory,name);
             if(File.Exists(candidate)&&!(name=="d3d12.dll"&&DotLocalAwareRecorder(candidate)))return candidate;
+        }
+        foreach(string candidate in Directory.GetFiles(directory,"*.dll")) {
+            if(!File.Exists(Path.Combine(system,Path.GetFileName(candidate))))continue;
+            string name=Path.GetFileName(candidate);
+            if(name.Equals("d3d12.dll",StringComparison.OrdinalIgnoreCase)||name.Equals("dxgi.dll",StringComparison.OrdinalIgnoreCase))continue;
+            string company=System.Diagnostics.FileVersionInfo.GetVersionInfo(candidate).CompanyName;
+            if(company==null||!company.StartsWith("Microsoft",StringComparison.Ordinal))return candidate;
         }
         return null;
     }
@@ -61,7 +75,7 @@ public static class Isolation {
     }
     public static void RequireNoLocalD3D12(string executable) {
         string local=LocalDirectXProxy(executable);
-        if(local!=null)throw new InvalidDataException("Per-game .local setup is blocked because this game already has a local DirectX proxy. Another mod may also hook DirectX, and combining the two can crash the game. Preserve the existing DLL; do not combine these mechanisms until compatibility is verified.\r\n"+local);
+        if(local!=null)throw new InvalidDataException("Per-game .local setup is blocked because this game already has a local stand-in for a Windows DLL, such as a DirectX mod or a mod loader. With a driver copy, Windows hands that DLL itself back when it loads the Windows DLL, and the game can freeze or not start. Remove the mod first, or keep this game on default settings.\r\n"+local);
     }
     public static string FindWitcher() {
         var roots=new List<string>();

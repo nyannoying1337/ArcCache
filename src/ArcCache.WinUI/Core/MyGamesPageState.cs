@@ -4,7 +4,7 @@ public enum MyGamesLoadResult { Unknown, Checking, DriverCopyLoaded, NormalDrive
 public enum MyGamesAction { None, AddGame, ChooseGame, ChooseAnotherGame, OpenGraphics, OpenGameFolder, LaunchForDiscovery, SetUp, Launch, LaunchAgain, ApplySize, RestoreGame, ReviewSetup, ReviewSavedSetup }
 
 public sealed record LocalModBlocker(string Path, bool IsDirectory = false, string? ProductName = null, string? FileDescription = null, string? CompanyName = null) {
-    public string DisplayName { get { string value=string.Join(" · ",new[]{ProductName,FileDescription,CompanyName}.Where(s=>!string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase));return value.Length>0?value:IsDirectory?"an existing .local folder":"an existing DirectX mod"; } }
+    public string DisplayName { get { string value=string.Join(" · ",new[]{ProductName,FileDescription,CompanyName}.Where(s=>!string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase));return value.Length>0?value:IsDirectory?"an existing .local folder":"an existing mod"; } }
 }
 
 public sealed record MyGamesPageInputs(
