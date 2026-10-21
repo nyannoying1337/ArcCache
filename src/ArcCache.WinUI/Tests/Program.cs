@@ -257,7 +257,10 @@ Test("SCSKiller's recorder: its own command, recognised by its version informati
         string exe=Path.Combine(folder,"game.exe");Check(!ScsKillerBridge.RecorderInstalled(exe),"An empty folder has a recorder.");
         File.WriteAllText(Path.Combine(folder,"d3d12.dll"),"another mod");Check(!ScsKillerBridge.RecorderInstalled(exe),"Any d3d12.dll was taken for SCSKiller's recorder.");
         string ff7=@"C:\Program Files (x86)\Steam\steamapps\common\FINAL FANTASY VII REMAKE\End\Binaries\Win64\d3d12.dll";
-        if(ScsKillerBridge.IsRecorder(ff7)){File.Copy(ff7,Path.Combine(folder,"d3d12.dll"),true);Check(ScsKillerBridge.RecorderInstalled(exe),"SCSKiller's recorder was not recognised.");Check(!ScsKillerBridge.InstalledRecorderDotLocalAware(exe),"An older recorder was taken for one that runs beside a driver copy.");}
+        if(ScsKillerBridge.IsRecorder(ff7)){File.Copy(ff7,Path.Combine(folder,"d3d12.dll"),true);Check(ScsKillerBridge.RecorderInstalled(exe),"SCSKiller's recorder was not recognised.");}
+        // The official app's 1.3.0 recorder (where it's installed) is the older kind.
+        string official=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"SCSKiller.App","current","native","d3d12.dll");
+        if(ScsKillerBridge.IsRecorder(official)&&System.Diagnostics.FileVersionInfo.GetVersionInfo(official).Comments!="exe.local-aware"){File.Copy(official,Path.Combine(folder,"d3d12.dll"),true);Check(ScsKillerBridge.RecorderInstalled(exe)&&!ScsKillerBridge.InstalledRecorderDotLocalAware(exe),"An older recorder was taken for one that runs beside a driver copy.");}
         string? built=null;for(var d=new DirectoryInfo(AppContext.BaseDirectory);d!=null&&built==null;d=d.Parent){string p=Path.Combine(d.FullName,"out","SCSKiller","native","d3d12.dll");if(File.Exists(p))built=p;}
         if(built!=null){File.Copy(built,Path.Combine(folder,"d3d12.dll"),true);Check(ScsKillerBridge.InstalledRecorderDotLocalAware(exe),"Arc Cache's SCSKiller recorder must run beside a driver copy: "+built);}
     }finally{Directory.Delete(folder,true);}
