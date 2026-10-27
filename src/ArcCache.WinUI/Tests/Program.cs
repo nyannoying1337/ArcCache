@@ -238,6 +238,7 @@ Test("SCSKiller bridge uses selected Steam ID, child-only Intel opt-in and no sh
     var command=ScsKillerBridge.Command(Path.Combine(Path.GetTempPath(),"scskiller.exe"),"compile",292030);
     Check(command.ArgumentList.SequenceEqual(new[]{"compile","steam:292030","--community"})&&!command.UseShellExecute&&command.RedirectStandardInput&&command.Verb=="","Unexpected bridge command or escalation.");
     Check(command.Environment["SCSKILLER_EXPERIMENTAL_INTEL"]=="1","Missing explicit child opt-in.");
+    Check(command.Environment["SCSKILLER_ALLOW_LIVE_DATA"]=="1"&&ScsKillerBridge.RecorderCommand(command.FileName,292030,true).Environment["SCSKILLER_ALLOW_LIVE_DATA"]=="1","SCSKiller 1.4 refuses the real data folder without it.");
     bool rejected=false;try{ScsKillerBridge.Command(command.FileName,"record",292030);}catch(ArgumentException){rejected=true;}Check(rejected,"Recorder installation must not be exposed through bridge.");
 });
 Test("My games: an older SCSKiller recorder offers Arc Cache's, any other mod the game folder",()=>{

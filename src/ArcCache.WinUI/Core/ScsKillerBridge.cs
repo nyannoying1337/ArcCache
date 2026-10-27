@@ -33,10 +33,17 @@ public sealed class ScsKillerBridge(string settingsPath) {
         Options=options;Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
         File.WriteAllText(settingsPath,JsonSerializer.Serialize(new BridgeSettings(CliPath,options.Threads,options.Background,options.Community)));
     }
+    /// <summary>A started SCSKiller CLI. SCSKiller 1.4 refuses the real %LOCALAPPDATA%\SCSKiller from a build without Update.exe
+    /// beside it (Arc Cache's bundled one) unless SCSKILLER_ALLOW_LIVE_DATA=1: Arc Cache works on the user's real games.</summary>
+    static ProcessStartInfo Child(string cli) {
+        var info=new ProcessStartInfo(Path.GetFullPath(cli)){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,RedirectStandardInput=true,WorkingDirectory=Path.GetDirectoryName(Path.GetFullPath(cli))!};
+        info.Environment["SCSKILLER_ALLOW_LIVE_DATA"]="1";
+        return info;
+    }
     public static ProcessStartInfo Command(string cli,string action,uint appId,PrivateDriverWarm? privateDriver=null,ScsKillerOptions? options=null) {
         if(action is not ("status" or "compile")||appId==0)throw new ArgumentException("Only a selected Steam game's status or compile command is supported.");
         if(privateDriver!=null)ValidatePrivateDriver(privateDriver,action);
-        var info=new ProcessStartInfo(Path.GetFullPath(cli)){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,RedirectStandardInput=true,WorkingDirectory=Path.GetDirectoryName(Path.GetFullPath(cli))!};
+        var info=Child(cli);
         options??=new();
         info.ArgumentList.Add(action);info.ArgumentList.Add("steam:"+appId);if(options.Community)info.ArgumentList.Add("--community");
         if(action=="compile"){
@@ -87,7 +94,7 @@ public sealed class ScsKillerBridge(string settingsPath) {
         if(CliPath==null||!File.Exists(CliPath))return new ScsKillerInfo(CliPath??"","","",false,"Choose scskiller.exe in Settings.");
         string fileVersion=FileVersionInfo.GetVersionInfo(CliPath).ProductVersion??"";
         string origin=Origin(CliPath);
-        var info=new ProcessStartInfo(CliPath){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,RedirectStandardInput=true,WorkingDirectory=Path.GetDirectoryName(CliPath)!};
+        var info=Child(CliPath);
         info.ArgumentList.Add("arc-cache-info");foreach(string key in HandoffEnvironmentKeys)info.Environment.Remove(key);
         string output="";int code=-1;
         try{
@@ -127,7 +134,7 @@ public sealed class ScsKillerBridge(string settingsPath) {
     /// DirectX mod, a running game) and adds or removes exactly its own files.</summary>
     public static ProcessStartInfo RecorderCommand(string cli,uint appId,bool install) {
         if(appId==0)throw new ArgumentException("Only a Steam game's recorder can be changed.");
-        var info=new ProcessStartInfo(Path.GetFullPath(cli)){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,RedirectStandardInput=true,WorkingDirectory=Path.GetDirectoryName(Path.GetFullPath(cli))!};
+        var info=Child(cli);
         info.ArgumentList.Add("record");info.ArgumentList.Add(install?"install":"uninstall");info.ArgumentList.Add("steam:"+appId);
         foreach(string key in HandoffEnvironmentKeys)info.Environment.Remove(key);
         info.Environment["SCSKILLER_EXPERIMENTAL_INTEL"]="1"; // SCSKiller supports a game on Intel only with it, as for status
