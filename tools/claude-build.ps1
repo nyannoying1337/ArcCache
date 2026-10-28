@@ -5,7 +5,7 @@ param([switch]$SkipScs, [switch]$SkipApp, [switch]$NoLaunch, [switch]$GitStatus,
 if ($RequestFile -and (Test-Path -LiteralPath $RequestFile)) {
     $words = (Get-Content -LiteralPath $RequestFile -Raw) -split '\s+' | Where-Object { $_ }
     $SkipScs = $words -contains '-SkipScs'; $SkipApp = $words -contains '-SkipApp'; $NoLaunch = $words -contains '-NoLaunch'; $GitStatus = $words -contains '-GitStatus'; $GitCommit = $words -contains '-GitCommit'; $GitPush = $words -contains '-GitPush'; $Release = $words -contains '-Release'; $Task = $words -contains '-Task'
-    $v = $words | Where-Object { $_ -match '^\d{4}\.\d{1,2}\.\d{1,2}$' } | Select-Object -First 1; if ($v) { $Version = $v }
+    $v = $words | Where-Object { $_ -match '^\d{4}\.\d{1,2}\.\d{1,2}(?:\.\d+)?$' } | Select-Object -First 1; if ($v) { $Version = $v }
 }
 $ErrorActionPreference = 'Stop'
 $tools = $PSScriptRoot
@@ -150,7 +150,9 @@ try {
         Copy-Item (Join-Path $rel 'scskiller_warm.exe'), (Join-Path $rel 'd3d12.dll') -Destination $native
         Get-ChildItem $rel -Filter 'amd_ags_x64.dll' | Copy-Item -Destination $native
         Copy-Item (Join-Path $rel 'segheap\scskiller_warm.exe') -Destination (Join-Path $native 'segheap')
-        try { Run 'scs-fetch-codecs' (Join-Path $cli 'scskiller.exe') @('fetch-codecs', $cli) } catch { Say "   WARNING: $($_.Exception.Message) (compiles that need codecs may fail)" }
+        # Public SCSKiller downloads native codecs to the user's data folder on first use.
+        # Oodle's redistribution permission is unresolved; never fetch it into a release.
+        Get-ChildItem -LiteralPath $cli -Recurse -File -Filter 'oodle-data-shared.dll' | Remove-Item -Force
         foreach ($f in @((Join-Path $cli 'scskiller.exe'), (Join-Path $native 'scskiller_warm.exe'), (Join-Path $native 'd3d12.dll'))) {
             Say ("   {0}  {1}" -f (Get-FileHash $f -Algorithm SHA256).Hash, $f)
         }
@@ -194,7 +196,7 @@ try {
         if (!$NoLaunch) { Start-Process -FilePath 'explorer.exe' -ArgumentList "`"$(Join-Path $appOut 'ArcCache.exe')`""; Say '   Arc Cache started through explorer.exe' }
     }
     if ($Release) {
-        if ($Version -notmatch '^\d{4}\.\d{1,2}\.\d{1,2}$') { throw 'release needs a version like 2026.10.16' }
+        if ($Version -notmatch '^\d{4}\.\d{1,2}\.\d{1,2}(?:\.\d+)?$') { throw 'release needs a version like 2026.10.16' }
         if (!(Test-Path (Join-Path $scsOut 'cli\scskiller.exe'))) { throw 'build SCSKiller first (release without -SkipScs)' }
         $step = 'release'
         $relRoot = Join-Path $repo 'out\release'; $payload = Join-Path $relRoot "ArcCache-$Version"

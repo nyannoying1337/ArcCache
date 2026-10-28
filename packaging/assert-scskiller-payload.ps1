@@ -17,6 +17,7 @@ foreach($entry in $provenance.Files.PSObject.Properties){
     $expected[$target]=$true
 }
 foreach($file in Get-ChildItem -LiteralPath $root -File -Recurse){
+    if($file.Name -eq 'oodle-data-shared.dll'){throw 'Native Oodle is downloaded locally on first use; it cannot be included in public packages.'}
     if($file.Name -in @('auth.dat','recorder.key','alpha-pass','recorder.revoked','settings.json') -or $file.FullName -match '[\\/](recorder-hosts|scskiller-own-data)[\\/]'){throw 'Local user data is forbidden in a distributable SCSKiller payload.'}
     if($file.FullName -eq $manifest -or $file.Name -in @('LICENSE','LICENSE-EXCEPTION.txt','THIRD-PARTY-NOTICES.md')){continue}
     if(!$expected.ContainsKey($file.FullName)){throw "Unaccounted file in SCSKiller payload: $($file.Name)"}

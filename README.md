@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/nyannoying1337/ArcCache/releases/latest"><img src="https://img.shields.io/badge/download-Windows_x64-36bff5?style=flat-square" alt="Windows x64 download" /></a>
-  <img src="https://img.shields.io/badge/release-2026.10.28-36bff5?style=flat-square" alt="Release 2026.10.28" />
+  <img src="https://img.shields.io/badge/release-2026.10.28.1-36bff5?style=flat-square" alt="Release 2026.10.28.1" />
   <img src="https://img.shields.io/badge/interface-WinUI_3-627d98?style=flat-square" alt="WinUI 3" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-7596b3?style=flat-square" alt="GPL-3.0-or-later" /></a>
 </p>
@@ -96,7 +96,7 @@ What Arc Cache does about it:
 
 > **When in doubt, don't.** No tool can promise that an anti-cheat accepts a modified driver file. A warning-free scan only means no *known* anti-cheat files were found.
 
-## What's new in 2026.10.28
+## What's new in 2026.10.28.1
 
 - **Shader preparation explains the first-launch check.** After changing cache size, launch the game once and leave it at the menu until Arc Cache verifies its driver copy. Close it before preparing shaders. No gameplay recording is required for this check; compatible community recordings or a game-file shader plan can be used without a local recording.
 - **Optional smooth overlay updates.** Under **Settings → On-screen stats**, turn on **Smooth updates** for smoother graph motion and more frequent recorder-data reads. Expensive cache and driver checks keep their two-second schedule. Recorder data may arrive less frequently than the overlay redraws; the overlay does not invent frame samples.
@@ -104,7 +104,7 @@ What Arc Cache does about it:
 - **See whether the traversal stutter fix is on.** SCSKiller's traversal stutter fix is set in the SCSKiller app. The game page now shows it as a row under **Prepared**: **On** or **Off**, read from the recorder in the game's folder.
 - **Bundled Intel SDK libraries stay with the game.** Driver-copy setup preserves an existing `igxess.dll` or `XeFX.dll` instead of shadowing it with the driver package's version. Their hashes are checked before launch, while removal leaves these game-owned files alone. Other package DLL conflicts still block setup.
 - **The overlay shows the traversal setting.** **Traversal stutter fix: On / Off** comes from the same recorder-settings model as the game page. Missing recorders and unavailable settings are identified separately. On reports configuration, not measured stutter reduction.
-- **Traversal verification is incomplete.** With a locally supplied 1.4.1-alpha.2 recorder, Satisfactory reaches a responsive menu and logs active traversal pooling alongside a driver copy. Witcher 3 v5.01 reaches gameplay with that recorder and the normal driver, but its test log shows no resources placed by the traversal pool. Updated driver-copy setup now preserves Witcher's bundled Intel SDK libraries; runtime loading still needs verification. Neither test establishes reduced gameplay stutters; repeatable comparisons with the feature on and off remain unverified. The included public recorder has not been verified to provide the alpha's traversal feature.
+- **Traversal verification is incomplete.** With a locally supplied 1.4.1-alpha.2 recorder, Satisfactory reaches a responsive menu and logs active traversal pooling alongside a driver copy. Witcher 3 v5.01 reaches gameplay with that recorder and the normal driver, but its test log shows no resources placed by the traversal pool. Driver-copy loading was verified in both games (16 GB in Satisfactory and 2 GB in Witcher 3). Witcher's bundled Intel SDK libraries remain unchanged. Neither test establishes reduced gameplay stutters; repeatable comparisons with the feature on and off remain unverified. The included public recorder has not been verified to provide the alpha's traversal feature.
 - **Public packages contain public SCSKiller only.** The included CLI/recorder comes from the reviewed public v1.2.5 fork. Unpublished alpha/beta source, binaries, assets and implementations are never distributed. A supplied recorder and its adapted copies stay in the user's local data/game folders. Public packaging verifies a pinned source revision and every bundled SCSKiller file hash; local user versions and credentials are excluded.
 
 <details>
@@ -171,8 +171,8 @@ What Arc Cache does about it:
 
 Get the latest release on the [**Releases page**](https://github.com/nyannoying1337/ArcCache/releases/latest):
 
-- **`ArcCache-Setup-2026.10.28-Windows-x64.exe`**: the installer, recommended. It installs for your Windows account only (no admin rights needed), adds a Start menu entry and updates an older Arc Cache in place.
-- **`ArcCache-2026.10.28-Windows-x64.zip`**: the portable version. Extract the **whole** ZIP and run `ArcCache.exe`.
+- **`ArcCache-Setup-2026.10.28.1-Windows-x64.exe`**: the installer, recommended. It installs for your Windows account only (no admin rights needed), adds a Start menu entry and updates an older Arc Cache in place.
+- **`ArcCache-2026.10.28.1-Windows-x64.zip`**: the portable version. Extract the **whole** ZIP and run `ArcCache.exe`.
 
 Each file has a `.sha256` next to it. Both are unsigned, so Windows SmartScreen may ask once. Arc Cache is self-contained, so you don't need .NET or anything else. It needs Windows 10 19041 or newer (tested on Windows 11) and an Intel Arc or Intel Xe graphics driver. A matching SCSKiller build is included in the `SCSKiller` folder.
 
