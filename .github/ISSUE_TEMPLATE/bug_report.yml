@@ -1,0 +1,82 @@
+name: Bug report
+description: Something in Arc Cache doesn't work as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please check the [open issues](https://github.com/nyannoying1337/ArcCache/issues) first.
+        **Never attach driver files, SCSKiller alpha/beta builds or your SCSKiller sign-in files.**
+  - type: input
+    id: version
+    attributes:
+      label: Arc Cache version
+      description: Shown in Settings, e.g. 2026.10.28.1
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver version
+      description: Shown on the Graphics page, e.g. Intel Arc B580 · 32.0.101.9150
+    validations:
+      required: true
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      description: Name and store (Steam, Epic, ...). Leave empty if it isn't about one game.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Game setup / driver copy
+        - Cache size
+        - Prepare shaders (SCSKiller)
+        - Recorder / frame-time graph
+        - On-screen stats
+        - Graphics page / driver check
+        - Installer or update
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: scskiller
+    attributes:
+      label: SCSKiller in use
+      options:
+        - Arc Cache's own SCSKiller
+        - My own SCSKiller (official stable)
+        - My own SCSKiller (alpha or beta)
+        - Not using SCSKiller
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        1. Selected ...
+        2. Clicked ...
+        3. Expected ..., but ...
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Activity log
+      description: Copy the relevant lines from the Activity page. Remove anything personal.
+      render: text
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Drag images here if they help.
+  - type: checkboxes
+    id: anticheat
+    attributes:
+      label: Anti-cheat
+      options:
+        - label: This game has no anti-cheat, or I'm not playing it online with a driver copy

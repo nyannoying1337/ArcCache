@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: SCSKiller itself
+    url: https://github.com/BlueHeisenberg/SCSKiller/issues
+    about: Problems with SCSKiller that also happen without Arc Cache belong there.

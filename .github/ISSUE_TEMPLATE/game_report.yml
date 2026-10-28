@@ -1,0 +1,62 @@
+name: Game report
+description: Tell us how a game works with a driver copy (works, crashes, stutters)
+labels: ["game report"]
+body:
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      description: Name and store, e.g. Satisfactory (Steam)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Arc Cache version
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver version
+    validations:
+      required: true
+  - type: dropdown
+    id: size
+    attributes:
+      label: Cache size
+      options:
+        - Default (512 MB)
+        - 1 GB
+        - 2 GB
+        - 4 GB
+        - 8 GB
+        - 16 GB
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works, less stutter
+        - Works, no difference
+        - Works, but new problems
+        - Doesn't start
+        - Crashes while playing
+    validations:
+      required: true
+  - type: checkboxes
+    id: extras
+    attributes:
+      label: Also used
+      options:
+        - label: Prepare shaders (SCSKiller)
+        - label: SCSKiller's recorder
+        - label: Traversal stutter fix
+        - label: Other mods (ReShade, OptiScaler, ...)
+  - type: textarea
+    id: notes
+    attributes:
+      label: Details
+      description: What you noticed, cache file size after playing, Activity log lines, screenshots of on-screen stats.
