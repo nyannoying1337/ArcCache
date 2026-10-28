@@ -1437,9 +1437,8 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
         scsRecorderRendering=true;try{ScsRecorder.IsOn=installed;}finally{scsRecorderRendering=false;}
         ScsRecorder.IsEnabled=blocked==null&&!developerMyGamesPreview;
         ScsRecorderText.Text=blocked??(brokenBesideCopy?"This recorder is too old for this game's driver copy and stops the game from starting. Turn this off."
-            :installed?"SCSKiller's recorder is in this game's folder. "+RecorderUse+TraversalLine(exe):"Puts SCSKiller's recorder (a d3d12.dll) in this game's folder. "+RecorderUse);
+            :installed?"SCSKiller's recorder is in this game's folder. "+RecorderUse:"Puts SCSKiller's recorder (a d3d12.dll) in this game's folder. "+RecorderUse);
     }
-    static string TraversalLine(string? exe)=>ScsKillerBridge.TraversalOn(exe) switch{true=>"\nTraversal stutter fix: on. Change it in the SCSKiller app.",false=>"\nTraversal stutter fix: off. Change it in the SCSKiller app.",null=>""};
     // Blocked by an older SCSKiller recorder: the selected SCSKiller replaces it with its exe.local-aware one ("record
     // install" updates an older recorder of its own), then the game is checked again.
     async void UpdateBlockingRecorder(){
@@ -1495,6 +1494,13 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
             grid.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});
             var label=new TextBlock{Text=view.Rows[i].Label,Style=muted};Grid.SetRow(label,i);
             var value=new TextBlock{Text=view.Rows[i].Value,TextWrapping=TextWrapping.Wrap,IsTextSelectionEnabled=true};Grid.SetRow(value,i);Grid.SetColumn(value,1);
+            grid.Children.Add(label);grid.Children.Add(value);
+        }
+        // the traversal stutter fix: what the recorder's scskiller.ini beside the game says; SCSKiller's own setting changes it
+        if(ScsKillerBridge.TraversalOn(selected?.SupportedExecutable) is bool traversal){
+            int row=grid.RowDefinitions.Count;grid.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});
+            var label=new TextBlock{Text="Traversal stutter fix",Style=muted};Grid.SetRow(label,row);
+            var value=new TextBlock{Text=(traversal?"On":"Off")+" · change it in the SCSKiller app",TextWrapping=TextWrapping.Wrap};Grid.SetRow(value,row);Grid.SetColumn(value,1);
             grid.Children.Add(label);grid.Children.Add(value);
         }
         ScsDetails.Children.Add(grid);
