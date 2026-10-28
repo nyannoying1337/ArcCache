@@ -1,7 +1,7 @@
 # Arc Cache + SCSKiller-Arc build and test (run outside any sandbox: cmd /c tools\claude-build.cmd).
 # Builds only; never runs driver trials, game setups, compiles, Reset or Cleanup.
 # Log: tools\claude-build.log, last line "CLAUDE-BUILD-RESULT: OK" or "CLAUDE-BUILD-RESULT: FAIL <step>".
-param([switch]$SkipScs, [switch]$SkipApp, [switch]$NoLaunch, [switch]$GitStatus, [switch]$GitCommit, [switch]$GitPush, [switch]$Release, [switch]$Task, [string]$Version = '', [string]$RequestFile)
+param([switch]$SkipScs, [switch]$SkipApp, [switch]$NoLaunch, [switch]$GitStatus, [switch]$GitCommit, [switch]$GitPush, [switch]$Release, [switch]$LocalOnly, [switch]$Task, [string]$Version = '', [string]$RequestFile)
 if ($RequestFile -and (Test-Path -LiteralPath $RequestFile)) {
     $words = (Get-Content -LiteralPath $RequestFile -Raw) -split '\s+' | Where-Object { $_ }
     $SkipScs = $words -contains '-SkipScs'; $SkipApp = $words -contains '-SkipApp'; $NoLaunch = $words -contains '-NoLaunch'; $GitStatus = $words -contains '-GitStatus'; $GitCommit = $words -contains '-GitCommit'; $GitPush = $words -contains '-GitPush'; $Release = $words -contains '-Release'; $Task = $words -contains '-Task'
@@ -123,14 +123,15 @@ try {
         $nb = Join-Path $scs 'proxy\build'
         # A release ships only SCSKiller source that is public: the checked-out commit must be on a GitHub branch
         # (origin or upstream). Unreleased alpha/beta source (a local branch such as arc-1.4.1) stays out of installers.
-        if ($Release) {
+        if ($Release -and $LocalOnly) { Say '   LOCAL ONLY: this installer may bundle unpublished SCSKiller source; never upload it' }
+        elseif ($Release) {
             & git -C $scs fetch -q origin 2>$null
             $public = & git -C $scs branch -r --contains HEAD 2>$null
             if (!$public) { throw "SCSKiller's checked-out commit isn't on GitHub: a release can't bundle unpublished SCSKiller source. Check out a public branch (intel-cache-cap)." }
             if (& git -C $scs status --porcelain --untracked-files=no) { throw "SCSKiller has uncommitted changes: a release builds only its public commit." }
         }
         # SCSKiller 1.4 (arc-1.4.1): all native targets, no C# tests. Older (intel-cache-cap, from 1.2.5): its three targets and tests.
-        $scs14 = !(Test-Path (Join-Path $scs 'tests\SCSKiller.Tests'))
+        $scs14 = !(& git -C $scs ls-files 'tests/SCSKiller.Tests')   # tracked files: a build leaves bin\ and obj\ behind
         # The recorder's version: just above the official SCSKiller release it must replace, so either app keeps this
         # exe.local-aware recorder until the official app ships a newer one. Raise it with each official release.
         $scsBase = if ($scs14) { '1.4.1' } else { '1.3.4' }
