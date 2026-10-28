@@ -18,6 +18,14 @@ public sealed class ScsKillerBridge(string settingsPath) {
     public string? CliPath {get;private set;}
     /// <summary>--community is Arc Cache's fork's option (its arc-cache-info answers): an official build refuses it as unknown.</summary>
     public bool TakesCommunity {get;private set;}=true;
+    /// <summary>Arc Cache's own SCSKiller, installed with it (null when missing, e.g. a development run).</summary>
+    public static string? BundledCli=>Path.Combine(AppContext.BaseDirectory,"SCSKiller","cli","scskiller.exe") is var p&&File.Exists(p)?p:null;
+    /// <summary>The user's own SCSKiller (an official alpha or beta) without Arc Cache's driver handoff. It keeps the recorder
+    /// and its settings (the traversal stutter fix); status and compile run Arc Cache's SCSKiller on <see cref="MirrorDir"/>,
+    /// a copy of the user's data, so a game's driver copy is used and the user's data folder is never written by another build.</summary>
+    public bool OwnBuild=>CliPath!=null&&!TakesCommunity&&BundledCli is string bundled&&!Path.GetFullPath(bundled).Equals(Path.GetFullPath(CliPath),StringComparison.OrdinalIgnoreCase);
+    public string MirrorDir=>Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settingsPath))!,"scskiller-own-data");
+    static string UserDataDir=>Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"SCSKiller");
     public ScsKillerBridge Load() {
         if(File.Exists(settingsPath)&&JsonSerializer.Deserialize<BridgeSettings>(File.ReadAllText(settingsPath)) is {} saved){CliPath=saved.CliPath;Options=new(saved.Threads is >=0 and <=64?saved.Threads:0,saved.Background,saved.Community);}
         return this;
@@ -106,7 +114,12 @@ public sealed class ScsKillerBridge(string settingsPath) {
             try{await process.WaitForExitAsync(timeout.Token);output=await read+"\n"+await err;code=process.ExitCode;}
             catch(OperationCanceledException){try{process.Kill(entireProcessTree:true);}catch(InvalidOperationException){}cancel.ThrowIfCancellationRequested();}
         }catch(Exception e) when (e is IOException or System.ComponentModel.Win32Exception or InvalidOperationException){return new ScsKillerInfo(CliPath,fileVersion,origin,false,"SCSKiller could not be asked what it supports: "+e.Message);}
-        var described=Describe(CliPath,fileVersion,origin,code,output);TakesCommunity=output.Contains("\"arcCacheHandoff\"",StringComparison.Ordinal);return described;
+        var described=Describe(CliPath,fileVersion,origin,code,output);TakesCommunity=output.Contains("\"arcCacheHandoff\"",StringComparison.Ordinal);
+        if(!OwnBuild||described.NeedsSignIn)return described;
+        // the user's own SCSKiller: Arc Cache's prepares the shaders, so its driver handoff is what counts
+        var own=new ScsKillerBridge(settingsPath){CliPath=BundledCli};
+        var bundled=await own.InspectAsync(cancel);
+        return described with{PrivateDriverSupport=bundled.PrivateDriverSupport,Note="Your own SCSKiller records, with its settings such as the traversal stutter fix. Arc Cache's SCSKiller prepares the shaders, so driver copies work."};
     }
     public static ScsKillerInfo Describe(string cli,string fileVersion,string origin,int exitCode,string output) {
         foreach(string line in output.Split('\n').Select(l=>l.Trim()).Where(l=>l.StartsWith('{')).Reverse()){
@@ -173,10 +186,101 @@ public sealed class ScsKillerBridge(string settingsPath) {
             if(File.Exists(path))return path;
         return null;
     }
-    public Task<int> RecorderAsync(uint appId,bool install,Action<string> progress,CancellationToken cancel)=>
-        RunProcess(()=>RecorderCommand(CliPath!,appId,install),progress,cancel);
-    public Task<int> RunAsync(string action,uint appId,Action<string> progress,CancellationToken cancel,PrivateDriverWarm? privateDriver=null)=>
-        RunProcess(()=>Command(CliPath!,action,appId,privateDriver,Options,TakesCommunity),progress,cancel);
+    public const string ChainName="d3d12.scskiller-next.dll";
+    /// <summary>A recorder that isn't exe.local-aware (an official SCSKiller's) gets itself back for Windows' d3d12.dll beside
+    /// a driver copy. SCSKiller's "record alongside" chains it to a d3d12.dll it finds in the folder (next=): Arc Cache puts a
+    /// copy of Windows' d3d12.dll and D3D12Core.dll there first, so the recorder passes everything to that copy. sig= doesn't
+    /// cover next=, so the signed lines (the traversal stutter fix) stay valid.</summary>
+    public static bool ChainedToSystem(string? executable) {
+        if(executable==null||Path.GetDirectoryName(Path.GetFullPath(executable)) is not string folder)return false;
+        string ini=Path.Combine(folder,"scskiller.ini"),next=Path.Combine(folder,ChainName);
+        try{return File.Exists(ini)&&File.ReadLines(ini).Any(l=>l.Trim()=="next="+ChainName)&&IsWindowsFile(next,"d3d12.dll");}catch(IOException){return false;}catch(UnauthorizedAccessException){return false;}
+    }
+    static bool IsWindowsFile(string path,string original) {
+        if(!File.Exists(path))return false;
+        try{var v=FileVersionInfo.GetVersionInfo(path);return v.CompanyName=="Microsoft Corporation"&&original.Equals(v.OriginalFilename?.Replace(".mui",""),StringComparison.OrdinalIgnoreCase);}catch(FileNotFoundException){return false;}
+    }
+    public async Task<int> RecorderAsync(uint appId,bool install,Action<string> progress,CancellationToken cancel,string? executable=null) {
+        string? folder=executable==null?null:Path.GetDirectoryName(Path.GetFullPath(executable));
+        bool chain=install&&folder!=null&&(Directory.Exists(executable+".local")||File.Exists(executable+".local"))&&!IsDotLocalAware(RecorderSource());
+        if(!chain){
+            int code=await RunProcess(()=>RecorderCommand(CliPath!,appId,install),progress,cancel);
+            if(!install&&folder!=null&&code==0)RemoveSystemCopies(folder);
+            return code;
+        }
+        string dll=Path.Combine(folder!,"d3d12.dll");
+        if(IsRecorder(dll)&&!ChainedToSystem(executable)){   // another recorder (Arc Cache's, or this one unchained): out first
+            int out_=await RunProcess(()=>RecorderCommand(CliPath!,appId,false),progress,cancel);
+            if(out_!=0)return out_;
+            RemoveSystemCopies(folder!);
+            if(File.Exists(dll))throw new InvalidOperationException("A d3d12.dll SCSKiller doesn't own is in the game's folder. Remove it first.");
+        }
+        string system=Environment.GetFolderPath(Environment.SpecialFolder.System);
+        if(!File.Exists(dll)&&!File.Exists(Path.Combine(folder!,ChainName)))PlaceSystemCopy(Path.Combine(system,"d3d12.dll"),dll);
+        string core=Path.Combine(folder!,"D3D12Core.dll");
+        if(!File.Exists(core))PlaceSystemCopy(Path.Combine(system,"D3D12Core.dll"),core);
+        int along=await RunProcess(()=>AlongsideCommand(CliPath!,appId),progress,cancel);
+        if(along!=0)return along;
+        int code2=await RunProcess(()=>RecorderCommand(CliPath!,appId,true),progress,cancel);
+        if(code2==0&&!ChainedToSystem(executable))throw new InvalidOperationException("SCSKiller installed its recorder without the chain to Windows' DirectX, so the game wouldn't start beside its driver copy. Turn recording off.");
+        return code2;
+    }
+    static ProcessStartInfo AlongsideCommand(string cli,uint appId) {
+        var info=RecorderCommand(cli,appId,true);info.ArgumentList.Clear();
+        info.ArgumentList.Add("record");info.ArgumentList.Add("alongside");info.ArgumentList.Add("steam:"+appId);info.ArgumentList.Add("on");
+        return info;
+    }
+    /// <summary>The copies Arc Cache placed for a chain, by path and SHA-256: only an unchanged one is ever removed.</summary>
+    string PlacedPath=>Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settingsPath))!,"system-copies.json");
+    Dictionary<string,string> Placed() {
+        try{return File.Exists(PlacedPath)?JsonSerializer.Deserialize<Dictionary<string,string>>(File.ReadAllText(PlacedPath))??new(StringComparer.OrdinalIgnoreCase):new(StringComparer.OrdinalIgnoreCase);}catch(JsonException){return new(StringComparer.OrdinalIgnoreCase);}
+    }
+    void PlaceSystemCopy(string source,string target) {
+        File.Copy(source,target,false);
+        var placed=new Dictionary<string,string>(Placed(),StringComparer.OrdinalIgnoreCase){[Path.GetFullPath(target)]=Sha256(target)};
+        File.WriteAllText(PlacedPath,JsonSerializer.Serialize(placed));
+    }
+    /// <summary>After the recorder is out: the Windows copies Arc Cache placed in <paramref name="folder"/> (SCSKiller puts the
+    /// chained d3d12.dll back under its own name), each only while unchanged.</summary>
+    void RemoveSystemCopies(string folder) {
+        var placed=Placed();bool changed=false;
+        foreach(string name in new[]{"d3d12.dll","D3D12Core.dll"}){
+            string path=Path.GetFullPath(Path.Combine(folder,name));
+            if(!placed.TryGetValue(path,out var hash))continue;
+            try{if(File.Exists(path)&&Sha256(path)==hash)File.Delete(path);}catch(Exception e) when (e is IOException or UnauthorizedAccessException){continue;}
+            if(!File.Exists(path)){placed.Remove(path);changed=true;}
+        }
+        if(changed)File.WriteAllText(PlacedPath,JsonSerializer.Serialize(placed));
+    }
+    static string Sha256(string path){using var s=File.OpenRead(path);return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(s));}
+    public Task<int> RunAsync(string action,uint appId,Action<string> progress,CancellationToken cancel,PrivateDriverWarm? privateDriver=null) {
+        if(!OwnBuild)return RunProcess(()=>Command(CliPath!,action,appId,privateDriver,Options,TakesCommunity),progress,cancel);
+        Mirror(UserDataDir,MirrorDir);
+        return RunProcess(()=>{var info=Command(BundledCli!,action,appId,privateDriver,Options);info.Environment["SCSKILLER_DATA_DIR"]=MirrorDir;return info;},progress,cancel);
+    }
+    /// <summary>Copies the user's SCSKiller data into <paramref name="to"/>: each file the user's SCSKiller changed since
+    /// (newer than the copy), never its lock or temporary files. A compile's own results stay until the user's SCSKiller
+    /// writes that file again. The copy forgets the recorder ini's hash, so Arc Cache's older SCSKiller never rewrites
+    /// the game's scskiller.ini (it would drop the lines it doesn't know, such as the traversal stutter fix's).</summary>
+    public static void Mirror(string from,string to) {
+        if(!Directory.Exists(from))return;
+        foreach(string file in Directory.EnumerateFiles(from,"*",SearchOption.AllDirectories)){
+            string name=Path.GetFileName(file);
+            if(name.EndsWith(".lock",StringComparison.OrdinalIgnoreCase)||name.Contains(".tmp",StringComparison.OrdinalIgnoreCase))continue;
+            string target=Path.Combine(to,Path.GetRelativePath(from,file));
+            try{
+                if(File.Exists(target)&&File.GetLastWriteTimeUtc(target)>=File.GetLastWriteTimeUtc(file))continue;
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);File.Copy(file,target,true);
+                if(name.Equals("state.json",StringComparison.OrdinalIgnoreCase))ForgetIniHash(target);
+            }catch(Exception e) when (e is IOException or UnauthorizedAccessException){}   // in use: the copy keeps its last version
+        }
+    }
+    static void ForgetIniHash(string state) {
+        try{
+            if(System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(state)) is not System.Text.Json.Nodes.JsonObject root||root["RecorderFiles"] is not System.Text.Json.Nodes.JsonObject files||!files.Remove("scskiller.ini"))return;
+            File.WriteAllText(state,root.ToJsonString());
+        }catch(JsonException){}
+    }
     async Task<int> RunProcess(Func<ProcessStartInfo> command,Action<string> progress,CancellationToken cancel) {
         if(CliPath==null||!File.Exists(CliPath))throw new FileNotFoundException("Choose the installed SCSKiller CLI in Settings first.");
         RequireConsole(CliPath);

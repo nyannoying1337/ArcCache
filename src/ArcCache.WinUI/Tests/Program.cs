@@ -80,6 +80,28 @@ foreach(var row in MyGamesPageStates.StateTable)Test("My games state table: "+ro
  if(row.Key=="setup-running")Check(state.ExpandedStep==1&&state.ProgressText.StartsWith("Step 1 of 3"),"Setup progress must belong to the running first step.");
  if(row.Key=="size-check-running")Check(state.ExpandedStep==3&&state.ShowStop&&state.ProgressText.StartsWith("Step 3 of 3"),"Size-check progress and Stop must belong to step 3.");
 });
+Test("Own SCSKiller: the data mirror and the recorder's chain to Windows' DirectX",()=>{
+    string root=Path.Combine(Path.GetTempPath(),"ArcOwn-"+Guid.NewGuid().ToString("N")),from=Path.Combine(root,"from"),to=Path.Combine(root,"to");
+    try{
+        Directory.CreateDirectory(Path.Combine(from,"games","steam_1"));
+        File.WriteAllText(Path.Combine(from,"games","steam_1","state.json"),"{\"Plan\":1,\"RecorderFiles\":{\"d3d12.dll\":\"AA\",\"scskiller.ini\":\"BB\"}}");
+        File.WriteAllText(Path.Combine(from,"games","steam_1","state.json.lock"),"");File.WriteAllText(Path.Combine(from,"settings.json"),"{}");
+        ScsKillerBridge.Mirror(from,to);
+        string state=File.ReadAllText(Path.Combine(to,"games","steam_1","state.json"));
+        Check(state.Contains("\"d3d12.dll\"")&&!state.Contains("scskiller.ini")&&state.Contains("\"Plan\":1"),"The mirror must forget only the recorder ini's hash: "+state);
+        Check(!File.Exists(Path.Combine(to,"games","steam_1","state.json.lock"))&&File.Exists(Path.Combine(to,"settings.json")),"Lock files must stay out of the mirror.");
+        File.WriteAllText(Path.Combine(to,"settings.json"),"{\"compiled\":1}");File.SetLastWriteTimeUtc(Path.Combine(to,"settings.json"),DateTime.UtcNow.AddMinutes(1));
+        ScsKillerBridge.Mirror(from,to);
+        Check(File.ReadAllText(Path.Combine(to,"settings.json")).Contains("compiled"),"A compile's newer file must stay until the user's SCSKiller writes it again.");
+        string game=Path.Combine(root,"game");Directory.CreateDirectory(game);string exe=Path.Combine(game,"game.exe");
+        Check(!ScsKillerBridge.ChainedToSystem(exe),"No ini is no chain.");
+        File.WriteAllText(Path.Combine(game,"scskiller.ini"),"[scskiller]\r\nnext="+ScsKillerBridge.ChainName+"\r\n");
+        File.WriteAllText(Path.Combine(game,ScsKillerBridge.ChainName),"not a dll");
+        Check(!ScsKillerBridge.ChainedToSystem(exe),"A chain to a mod is not the chain to Windows' DirectX.");
+        File.Copy(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"d3d12.dll"),Path.Combine(game,ScsKillerBridge.ChainName),true);
+        Check(ScsKillerBridge.ChainedToSystem(exe),"A chain to a copy of Windows' d3d12.dll must be recognised.");
+    }finally{Directory.Delete(root,true);}
+});
 Test("Trial setup requires game observed with tested driver copy",()=>{
  var state=MyGamesPageStates.Resolve(new(RequiresTrialProfile:true,TrialProfileFound:false,ProfileFound:true));
  Check(state.Key=="trial-profile-not-found"&&state.AccentAction==MyGamesAction.LaunchForDiscovery&&!state.ShowSetupAction,"A stock-driver profile must not expose setup before the tested driver copy has been observed.");
