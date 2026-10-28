@@ -118,6 +118,8 @@ try {
 
     if (!$SkipScs) {
         if (!$cmake) { throw 'cmake not found (install the VS "C++ CMake tools" component)' }
+        # every core: MSBuild builds the projects in parallel (--parallel), cl.exe each project's files (/MP)
+        $cores = [Environment]::ProcessorCount; $env:CL = '/MP'
         $nb = Join-Path $scs 'proxy\build'
         # A release ships only SCSKiller source that is public: the checked-out commit must be on a GitHub branch
         # (origin or upstream). Unreleased alpha/beta source (a local branch such as arc-1.4.1) stays out of installers.
@@ -135,9 +137,9 @@ try {
         $cliBase = if ($scs14) { '1.4.1' } else { '1.2.5' }
         $nativeVersion = "$scsBase-arc.1"
         Run 'scs-native-configure' $cmake @('-S', (Join-Path $scs 'proxy'), '-B', $nb, '-A', 'x64', "-DSCSK_VERSION=$nativeVersion")
-        if ($scs14) { Run 'scs-native-build' $cmake @('--build', $nb, '--config', 'Release') }
+        if ($scs14) { Run 'scs-native-build' $cmake @('--build', $nb, '--config', 'Release', '--parallel', $cores) }
         else {
-            Run 'scs-native-build' $cmake @('--build', $nb, '--config', 'Release', '--target', 'scskiller', 'scskiller_warm', 'scskiller_warm_segheap')
+            Run 'scs-native-build' $cmake @('--build', $nb, '--config', 'Release', '--parallel', $cores, '--target', 'scskiller', 'scskiller_warm', 'scskiller_warm_segheap')
             Run 'scs-tests' $dotnet @('test', (Join-Path $scs 'tests\SCSKiller.Tests\SCSKiller.Tests.csproj'), '-c', 'Release', '--filter', 'FullyQualifiedName~ArcCacheDriver|FullyQualifiedName~IntelCacheCap|FullyQualifiedName~WarmerTests')
         }
         $cli = Join-Path $scsOut 'cli'; $native = Join-Path $scsOut 'native'
