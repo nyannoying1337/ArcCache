@@ -16,6 +16,8 @@ public sealed record ScsKillerProgress(string Stage,long Done,long Total,string 
 
 public sealed class ScsKillerBridge(string settingsPath) {
     public string? CliPath {get;private set;}
+    /// <summary>--community is Arc Cache's fork's option (its arc-cache-info answers): an official build refuses it as unknown.</summary>
+    public bool TakesCommunity {get;private set;}=true;
     public ScsKillerBridge Load() {
         if(File.Exists(settingsPath)&&JsonSerializer.Deserialize<BridgeSettings>(File.ReadAllText(settingsPath)) is {} saved){CliPath=saved.CliPath;Options=new(saved.Threads is >=0 and <=64?saved.Threads:0,saved.Background,saved.Community);}
         return this;
@@ -40,12 +42,12 @@ public sealed class ScsKillerBridge(string settingsPath) {
         info.Environment["SCSKILLER_ALLOW_LIVE_DATA"]="1";
         return info;
     }
-    public static ProcessStartInfo Command(string cli,string action,uint appId,PrivateDriverWarm? privateDriver=null,ScsKillerOptions? options=null) {
+    public static ProcessStartInfo Command(string cli,string action,uint appId,PrivateDriverWarm? privateDriver=null,ScsKillerOptions? options=null,bool takesCommunity=true) {
         if(action is not ("status" or "compile")||appId==0)throw new ArgumentException("Only a selected Steam game's status or compile command is supported.");
         if(privateDriver!=null)ValidatePrivateDriver(privateDriver,action);
         var info=Child(cli);
         options??=new();
-        info.ArgumentList.Add(action);info.ArgumentList.Add("steam:"+appId);if(options.Community)info.ArgumentList.Add("--community");
+        info.ArgumentList.Add(action);info.ArgumentList.Add("steam:"+appId);if(options.Community&&takesCommunity)info.ArgumentList.Add("--community");
         if(action=="compile"){
             if(options.Threads is >0 and <=64){info.ArgumentList.Add("--threads");info.ArgumentList.Add(options.Threads.ToString(System.Globalization.CultureInfo.InvariantCulture));}
             if(options.Background)info.ArgumentList.Add("--idle");
@@ -104,7 +106,7 @@ public sealed class ScsKillerBridge(string settingsPath) {
             try{await process.WaitForExitAsync(timeout.Token);output=await read+"\n"+await err;code=process.ExitCode;}
             catch(OperationCanceledException){try{process.Kill(entireProcessTree:true);}catch(InvalidOperationException){}cancel.ThrowIfCancellationRequested();}
         }catch(Exception e) when (e is IOException or System.ComponentModel.Win32Exception or InvalidOperationException){return new ScsKillerInfo(CliPath,fileVersion,origin,false,"SCSKiller could not be asked what it supports: "+e.Message);}
-        return Describe(CliPath,fileVersion,origin,code,output);
+        var described=Describe(CliPath,fileVersion,origin,code,output);TakesCommunity=output.Contains("\"arcCacheHandoff\"",StringComparison.Ordinal);return described;
     }
     public static ScsKillerInfo Describe(string cli,string fileVersion,string origin,int exitCode,string output) {
         foreach(string line in output.Split('\n').Select(l=>l.Trim()).Where(l=>l.StartsWith('{')).Reverse()){
@@ -174,7 +176,7 @@ public sealed class ScsKillerBridge(string settingsPath) {
     public Task<int> RecorderAsync(uint appId,bool install,Action<string> progress,CancellationToken cancel)=>
         RunProcess(()=>RecorderCommand(CliPath!,appId,install),progress,cancel);
     public Task<int> RunAsync(string action,uint appId,Action<string> progress,CancellationToken cancel,PrivateDriverWarm? privateDriver=null)=>
-        RunProcess(()=>Command(CliPath!,action,appId,privateDriver,Options),progress,cancel);
+        RunProcess(()=>Command(CliPath!,action,appId,privateDriver,Options,TakesCommunity),progress,cancel);
     async Task<int> RunProcess(Func<ProcessStartInfo> command,Action<string> progress,CancellationToken cancel) {
         if(CliPath==null||!File.Exists(CliPath))throw new FileNotFoundException("Choose the installed SCSKiller CLI in Settings first.");
         RequireConsole(CliPath);
