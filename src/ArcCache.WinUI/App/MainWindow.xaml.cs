@@ -1403,7 +1403,7 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
     void RenderScsTool(){
         if(ScsToolText==null)return;
         ScsToolText.Text=scs?.CliPath==null?"No SCSKiller selected.":scsInfoChecking||scsInfo==null?"Checking which SCSKiller is selected…"
-            :$"Using {scsInfo.Origin} · {scsInfo.Version} · "+(scsInfo.PrivateDriverSupport?"can use driver copies":"Default games only");
+            :$"Using {scsInfo.Origin} · {scsInfo.Version} · "+(scsInfo.NeedsSignIn?"needs your Patreon sign-in in SCSKiller":scsInfo.PrivateDriverSupport?"can use driver copies":"Default games only");
         ToolTipService.SetToolTip(ScsToolText,scsInfo?.Note);
         var link=selected?.SupportedExecutable is string exe?cacheFiles?.For(exe):null;
         ScsToolPath.Text=(scs?.CliPath==null?"":"Program: "+scs.CliPath+(scsInfo==null?"":"\n"+scsInfo.Note))+(link==null?"":$"\nIntel cache file: {link.File} · linked {link.ObservedUtc.ToLocalTime():g} ({link.Source})");

@@ -7,7 +7,7 @@ public sealed record PrivateDriverWarm(string GameExecutable,string DriverDirect
 /// <summary>What the selected SCSKiller is. PrivateDriverSupport: its CLI answers arc-cache-info and its warm exe takes
 /// --driver-local. Without it (an official portable or beta build) a game with a larger driver copy must not be compiled:
 /// the stock driver would trim that game's cache back to 512 MB.</summary>
-public sealed record ScsKillerInfo(string CliPath,string Version,string Origin,bool PrivateDriverSupport,string Note);
+public sealed record ScsKillerInfo(string CliPath,string Version,string Origin,bool PrivateDriverSupport,string Note,bool NeedsSignIn=false);
 /// <summary>Compile options. Threads 0 = SCSKiller's choice. Background = --idle (lower priority).</summary>
 public sealed record ScsKillerOptions(int Threads=0,bool Background=false,bool Community=true);
 /// <summary>One progress line of the CLI ("20:19:35 steam:1623730 Warming 1200/94165 (3 failed, 2 skipped: not in this install)
@@ -101,7 +101,7 @@ public sealed class ScsKillerBridge(string settingsPath) {
             using var process=Process.Start(info)??throw new IOException("SCSKiller could not start.");process.StandardInput.Close();
             using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancel);timeout.CancelAfter(TimeSpan.FromSeconds(20));
             var read=process.StandardOutput.ReadToEndAsync(timeout.Token);var err=process.StandardError.ReadToEndAsync(timeout.Token);
-            try{await process.WaitForExitAsync(timeout.Token);output=await read;await err;code=process.ExitCode;}
+            try{await process.WaitForExitAsync(timeout.Token);output=await read+"\n"+await err;code=process.ExitCode;}
             catch(OperationCanceledException){try{process.Kill(entireProcessTree:true);}catch(InvalidOperationException){}cancel.ThrowIfCancellationRequested();}
         }catch(Exception e) when (e is IOException or System.ComponentModel.Win32Exception or InvalidOperationException){return new ScsKillerInfo(CliPath,fileVersion,origin,false,"SCSKiller could not be asked what it supports: "+e.Message);}
         return Describe(CliPath,fileVersion,origin,code,output);
@@ -116,6 +116,9 @@ public sealed class ScsKillerBridge(string settingsPath) {
                 return new ScsKillerInfo(cli,version,origin,warm,warm?"Can compile with a game's larger driver copy.":"Its compile program (scskiller_warm.exe) is older than its CLI and can't use a game's driver copy. Rebuild or reinstall this SCSKiller.");
             }catch(Exception e) when (e is JsonException or InvalidOperationException or FormatException){}
         }
+        // an alpha build's CLI refuses every command until the SCSKiller app has a Patreon backer sign-in (its AlphaGate)
+        if(output.Contains("needs a Patreon backer sign-in",StringComparison.Ordinal))return new ScsKillerInfo(cli,ShortVersion(fileVersion),origin,false,"This SCSKiller alpha needs your Patreon sign-in. Open the SCSKiller app once and sign in, then choose Check again.",NeedsSignIn:true);
+        if(fileVersion.Contains("-alpha",StringComparison.OrdinalIgnoreCase))return new ScsKillerInfo(cli,ShortVersion(fileVersion),origin,false,"Your own SCSKiller alpha. Its recorder and settings (for example the traversal stutter fix) apply to games on Default. Compiling with a driver copy needs Arc Cache's SCSKiller.");
         return new ScsKillerInfo(cli,ShortVersion(fileVersion),origin,false,exitCode==0?"This SCSKiller doesn't report Arc Cache support.":"This SCSKiller doesn't know Arc Cache's driver handoff (for example an official portable or beta build). It can prepare shaders for games on Default only.");
     }
     static string ShortVersion(string version) {

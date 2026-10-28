@@ -280,6 +280,10 @@ Test("SCSKiller options, progress lines and build support are read correctly",()
     var oldWarm=ScsKillerBridge.Describe("x","","Installed SCSKiller",0,"{\"arcCacheHandoff\":1,\"version\":\"1.2.5\",\"warmDriverLocal\":false}");
     Check(!oldWarm.PrivateDriverSupport&&oldWarm.Note.Contains("scskiller_warm"),"An old warm exe was accepted for driver copies.");
     var upstream=ScsKillerBridge.Describe("x","1.3.0-beta.2","Portable SCSKiller",1,"error: unknown command 'arc-cache-info'");
+    var gated=ScsKillerBridge.Describe("x","1.4.1-alpha.1","Installed SCSKiller",1,"error: x\nThis alpha needs a Patreon backer sign-in in the SCSKiller app first.");
+    Check(gated.NeedsSignIn&&!gated.PrivateDriverSupport,"An alpha without sign-in must ask for it.");
+    var alpha=ScsKillerBridge.Describe("x","1.4.1-alpha.1","Installed SCSKiller",1,"error: unknown command 'arc-cache-info'");
+    Check(!alpha.NeedsSignIn&&!alpha.PrivateDriverSupport&&alpha.Note.Contains("traversal"),"A signed-in alpha is a Default-games SCSKiller.");
     Check(!upstream.PrivateDriverSupport&&upstream.Version=="1.3.0-beta.2"&&upstream.Note.Contains("Default only"),"An official build was accepted for driver copies.");
     Check(ScsKillerBridge.Origin(@"C:\Users\Nick\Desktop\scskiller-1.3.0-beta.2-portable\current\cli\scskiller.exe")=="Portable SCSKiller","Portable build not named.");
     string settings=Path.Combine(Path.GetTempPath(),"ArcScsOptions-"+Guid.NewGuid().ToString("N")+".json");
