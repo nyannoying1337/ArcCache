@@ -284,6 +284,12 @@ Test("SCSKiller options, progress lines and build support are read correctly",()
     Check(gated.NeedsSignIn&&!gated.PrivateDriverSupport,"An alpha without sign-in must ask for it.");
     var alpha=ScsKillerBridge.Describe("x","1.4.1-alpha.1","Installed SCSKiller",1,"error: unknown command 'arc-cache-info'");
     Check(!alpha.NeedsSignIn&&!alpha.PrivateDriverSupport&&alpha.Note.Contains("traversal"),"A signed-in alpha is a Default-games SCSKiller.");
+    string tdir=Path.Combine(Path.GetTempPath(),"ArcTraversal-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(tdir);string texe=Path.Combine(tdir,"game.exe");
+    try{
+        Check(ScsKillerBridge.TraversalOn(texe)==null,"No ini must read as unknown.");
+        File.WriteAllText(Path.Combine(tdir,"scskiller.ini"),"[scskiller]\r\nmode=record\r\n");Check(ScsKillerBridge.TraversalOn(texe)==false,"An ini without traversal keys must read as off.");
+        File.WriteAllText(Path.Combine(tdir,"scskiller.ini"),"[scskiller]\r\ntraversal_suballocate=1\r\n");Check(ScsKillerBridge.TraversalOn(texe)==true,"traversal_suballocate=1 must read as on.");
+    }finally{Directory.Delete(tdir,true);}
     Check(!upstream.PrivateDriverSupport&&upstream.Version=="1.3.0-beta.2"&&upstream.Note.Contains("Default only"),"An official build was accepted for driver copies.");
     Check(ScsKillerBridge.Origin(@"C:\Users\Nick\Desktop\scskiller-1.3.0-beta.2-portable\current\cli\scskiller.exe")=="Portable SCSKiller","Portable build not named.");
     string settings=Path.Combine(Path.GetTempPath(),"ArcScsOptions-"+Guid.NewGuid().ToString("N")+".json");

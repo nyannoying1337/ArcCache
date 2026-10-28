@@ -1437,8 +1437,9 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
         scsRecorderRendering=true;try{ScsRecorder.IsOn=installed;}finally{scsRecorderRendering=false;}
         ScsRecorder.IsEnabled=blocked==null&&!developerMyGamesPreview;
         ScsRecorderText.Text=blocked??(brokenBesideCopy?"This recorder is too old for this game's driver copy and stops the game from starting. Turn this off."
-            :installed?"SCSKiller's recorder is in this game's folder. "+RecorderUse:"Puts SCSKiller's recorder (a d3d12.dll) in this game's folder. "+RecorderUse);
+            :installed?"SCSKiller's recorder is in this game's folder. "+RecorderUse+TraversalLine(exe):"Puts SCSKiller's recorder (a d3d12.dll) in this game's folder. "+RecorderUse);
     }
+    static string TraversalLine(string? exe)=>ScsKillerBridge.TraversalOn(exe) switch{true=>"\nTraversal stutter fix: on. Change it in the SCSKiller app.",false=>"\nTraversal stutter fix: off. Change it in the SCSKiller app.",null=>""};
     // Blocked by an older SCSKiller recorder: the selected SCSKiller replaces it with its exe.local-aware one ("record
     // install" updates an older recorder of its own), then the game is checked again.
     async void UpdateBlockingRecorder(){

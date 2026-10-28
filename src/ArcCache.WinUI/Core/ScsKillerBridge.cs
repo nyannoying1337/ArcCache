@@ -155,6 +155,13 @@ public sealed class ScsKillerBridge(string settingsPath) {
         if(dll==null||!IsRecorder(dll))return false;
         try{return FileVersionInfo.GetVersionInfo(dll).Comments=="exe.local-aware";}catch(FileNotFoundException){return false;}
     }
+    /// <summary>Whether the recorder's scskiller.ini beside the game turns SCSKiller's traversal stutter fix on
+    /// (traversal_suballocate=1, written from SCSKiller's own setting); null without that ini.</summary>
+    public static bool? TraversalOn(string? executable) {
+        if(executable==null||Path.GetDirectoryName(Path.GetFullPath(executable)) is not string folder)return null;
+        string ini=Path.Combine(folder,"scskiller.ini");
+        try{return File.Exists(ini)?File.ReadLines(ini).Any(l=>l.Trim()=="traversal_suballocate=1"):null;}catch(IOException){return null;}catch(UnauthorizedAccessException){return null;}
+    }
     public static bool InstalledRecorderDotLocalAware(string? executable)=>executable!=null&&Path.GetDirectoryName(Path.GetFullPath(executable)) is string folder&&IsDotLocalAware(Path.Combine(folder,"d3d12.dll"));
     /// <summary>The recorder the selected CLI installs, found as SCSKiller's NativeTools.Find does: native\ next to the
     /// CLI, the CLI's folder, then native\ one folder up (Arc Cache's SCSKiller\cli and SCSKiller\native).</summary>
