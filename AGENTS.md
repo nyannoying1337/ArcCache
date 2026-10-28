@@ -8,3 +8,9 @@
 - One term per concept: "driver copy", "game-specific settings", "cache size", "set up" (verb) / "setup" (noun). Page titles match nav labels exactly.
 - The status bar shows only the result of an action from the last few seconds, then clears.
 - Multi-step flows are numbered. Completed steps collapse to one line with a check mark. Progress at 100% reads "Done", never "Working...".
+
+## SCSKiller publication boundary
+- Never commit, push, upload or distribute BlueHeisenberg's unpublished alpha/beta source, binaries, extracted assets or implementations derived from that unpublished source. A local fork or our own public branch does not make upstream material public.
+- Public packages may contain only SCSKiller material already published publicly by BlueHeisenberg, plus our changes based on that public material. Verify provenance before publication.
+- Users may provide their own alpha/beta locally. Local adapters, CLI hosting, settings and signing must remain on that user's machine; never include their supplied files, credentials, signatures or local host copies in the repo or release payload.
+- A local compatibility test using unpublished source is not evidence that the public package supports those features. Clearly identify unsupported combinations; do not promise alpha/beta functionality through a public recorder without testing that public recorder.

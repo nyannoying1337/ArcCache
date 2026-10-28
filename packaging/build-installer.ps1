@@ -7,16 +7,20 @@ param(
     [string] $Version,
 
     [string] $OutputDirectory = (Join-Path $PSScriptRoot '..\out\installer'),
-    [string] $CompilerPath
+    [string] $CompilerPath,
+    [switch] $LocalOnly
 )
 
 $ErrorActionPreference = 'Stop'
 
 $payloadPath = (Resolve-Path -LiteralPath $PayloadDirectory).Path
+Get-ChildItem -LiteralPath $payloadPath -Recurse -File | ForEach-Object {if($_.Name -in @('auth.dat','recorder.key','alpha-pass','recorder.revoked') -or $_.FullName -match '[\\/](recorder-hosts|scskiller-own-data|local-only-backups)[\\/]'){throw 'Local user versions, credentials and adapter caches cannot be packaged.'}}
+if(Test-Path -LiteralPath (Join-Path $payloadPath 'SCSKiller')){& (Join-Path $PSScriptRoot 'assert-scskiller-payload.ps1') -Directory (Join-Path $payloadPath 'SCSKiller')}
 $requiredFiles = @(
     'ArcCache.exe',
     'ArcCache.SafetyEngine.exe',
     'ArcCache.DriverProbe.exe',
+    'ArcCache.Loader.dll',
     'LICENSE',
     'NOTICE.md',
     'GETTING-STARTED.md'

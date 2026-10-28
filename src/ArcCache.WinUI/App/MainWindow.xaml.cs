@@ -1,4 +1,4 @@
-﻿using ArcCache.Core;
+using ArcCache.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -609,7 +609,7 @@ public partial class MainWindow : Window {
                 AppliedDefault:selectedReceipt?.MiB is null or <=512,ChosenDefault:chosen<=512,
                 LoadResult:EffectiveLoadResult(),LaunchLabel:LaunchThroughLabel(),CacheSize:CacheLabel(chosen),AvailableSizes:CacheSizesForGame(),AppliedChoiceMatches:selectedReceipt?.MiB==chosen,TrialNeedsRetest:setupState?.TrialNeedsRetest==true,DiscoveryMessage:discoveryMessage,SizeVerified:setupState?.Configured==true&&selectedReceipt?.MiB>512&&selectedReceipt.Status=="size-loading-verified",
                 ModBlocker:selected?.Key==activeModBlockerGameKey?activeModBlocker:null,
-                RecorderUpdate:selected?.Key==activeModBlockerGameKey&&activeModBlocker is {IsDirectory:false} blockingDll&&ScsKillerBridge.IsRecorder(blockingDll.Path)&&ScsKillerBridge.IsDotLocalAware(scs?.RecorderSource()),
+                RecorderUpdate:selected?.Key==activeModBlockerGameKey&&activeModBlocker is {IsDirectory:false} blockingDll&&ScsKillerBridge.IsRecorder(blockingDll.Path)&&(ScsKillerBridge.IsDotLocalAware(scs?.RecorderSource())||ScsKillerBridge.RecorderLoaderSource!=null&&scs?.RecorderSource()!=null),
                 RequiresTrialProfile:TrialMode,TrialProfileFound:selected?.TrialProfileReady==true,
                 AntiCheatSeen:selected is null?null:sightings?.Get(selected.Key),
                 AntiCheatFiles:selected is not null&&antiCheatHints.TryGetValue(selected.Key,out var acFiles)&&acFiles.AlwaysOn?acFiles:null,
@@ -690,11 +690,9 @@ public partial class MainWindow : Window {
         StopSizeCheckButton.Visibility=state.ShowStop&&state.ExpandedStep==3?Visibility.Visible:Visibility.Collapsed;StopSizeCheckButton.IsEnabled=developerMyGamesPreview||!busy;
         ScsCard.Visibility=state.ShowGameFlow&&state.Step2Complete?Visibility.Visible:Visibility.Collapsed;
         ScsStatusButton.IsEnabled=!busy&&!scsRunning&&selected!=null&&scs?.CliPath!=null&&selected?.Source=="Steam"&&!developerMyGamesPreview;
-        var scsPrivateWarm=CreateScsPrivateWarm();
-        ScsCompileButton.IsEnabled=ScsStatusButton.IsEnabled&&(selectedReceipt?.MiB<=512||scsPrivateWarm!=null&&scsInfo?.PrivateDriverSupport==true);
-        ScsSummary.Text=selected?.Source!="Steam"?"SCSKiller is currently available for Steam games.":selectedReceipt?.MiB>512
-            ?scsPrivateWarm!=null?$"Compiles this game's shaders ahead of time with its {SetupPresentation.Limit(scsPrivateWarm.CacheMiB)} driver copy, so they stay in the cache.":"This game's larger driver copy is not verified for shader preparation. Fix the game setup or return it to Default first."
-            :scs?.CliPath is null||developerMyGamesPreview?"Choose the SCSKiller command-line program in Settings first. Default uses the normal Intel driver.":"Optional: prepare shaders with your existing SCSKiller account. Default uses the normal Intel driver.";
+        var preparation=ScsPreparation();
+        ScsCompileButton.IsEnabled=preparation.CanCompile&&!developerMyGamesPreview;
+        ScsSummary.Text=preparation.Summary;ScsCompileReason.Text=preparation.BlockReason??"";ScsCompileReason.Visibility=preparation.BlockReason==null?Visibility.Collapsed:Visibility.Visible;
         RenderScsTool();
         RestoreButton.Visibility=setupState?.ReceiptExists==true&&state.Key is not "empty-library" and not "no-selection"?Visibility.Visible:Visibility.Collapsed;
         RestoreButton.IsEnabled=!busy&&recordValid&&selected?.SupportedExecutable is not null&&!developerMyGamesPreview;
@@ -870,11 +868,9 @@ public partial class MainWindow : Window {
         if((selectedCacheMiB>=4096||selectedReceipt?.MiB>=4096)&&selectedReceipt?.Trial==true)LimitAvailability.Text+=" Larger sizes are experimental: the driver copy loads, but cache reload is not verified.";
         if(configured&&!same&&GameDriverReady&&routingReady&&!NeedsControlObservation()&&CapChoice.SelectedItem is ComboBoxItem cap)ApplyButton.Content="Apply "+SetupPresentation.Limit(int.Parse(cap.Tag.ToString()!));
         ScsStatusButton.IsEnabled=!busy&&!scsRunning&&selected!=null&&scs?.CliPath!=null&&selected?.Source=="Steam";
-        var scsPrivateWarm=CreateScsPrivateWarm();
-        ScsCompileButton.IsEnabled=ScsStatusButton.IsEnabled&&(!configured||selectedReceipt?.MiB<=512||scsPrivateWarm!=null&&scsInfo?.PrivateDriverSupport==true);
-        ScsSummary.Text=selected?.Source!="Steam"?"SCSKiller integration currently supports Steam games only.":configured&&selectedReceipt?.MiB>512
-            ?scsPrivateWarm!=null?$"Compiles this game's shaders ahead of time with its {SetupPresentation.Limit(scsPrivateWarm.CacheMiB)} driver copy, so they stay in the cache.":"This larger driver copy is not verified for shader preparation. Fix the game setup or return it to Default first."
-            : "SCSKiller prepares shaders with the normal driver and Default size. Community downloads need your existing SCSKiller account and settings.";
+        var preparation=ScsPreparation();
+        ScsCompileButton.IsEnabled=preparation.CanCompile&&!developerMyGamesPreview;
+        ScsSummary.Text=preparation.Summary;ScsCompileReason.Text=preparation.BlockReason??"";ScsCompileReason.Visibility=preparation.BlockReason==null?Visibility.Collapsed:Visibility.Visible;
         RenderScsTool();
     }
     string LimitEvidence(int mib){
@@ -1208,7 +1204,7 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
         StopCacheMonitor();var info=new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory,"ArcCache.SafetyEngine.exe")){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
         var link=cacheFiles?.For(exe);
         foreach(string arg in new[]{"--cache-monitor",exe,mib.ToString(System.Globalization.CultureInfo.InvariantCulture),link?.File??"-",
-            (scsStatuses.GetValueOrDefault(game.Key)?.EstimateBytes??0).ToString(System.Globalization.CultureInfo.InvariantCulture),new string(game.Name.Where(c=>!char.IsControl(c)).Take(200).ToArray()),overlaySettings.Corner})info.ArgumentList.Add(arg);
+            (scsStatuses.GetValueOrDefault(game.Key)?.EstimateBytes??0).ToString(System.Globalization.CultureInfo.InvariantCulture),new string(game.Name.Where(c=>!char.IsControl(c)).Take(200).ToArray()),overlaySettings.Corner,overlaySettings.SmoothUpdates?"smooth":"standard"})info.ArgumentList.Add(arg);
         cacheMonitor=Process.Start(info)??throw new IOException("The cache monitor could not start.");monitorGameKey=game.Key;
         await Task.Delay(1000);
         if(cacheMonitor.HasExited){string result=await cacheMonitor.StandardOutput.ReadToEndAsync();StopCacheMonitor();throw new IOException("Monitor could not start: "+result);}
@@ -1243,7 +1239,7 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
         overlaySettingsPath=Path.Combine(store.Root,"overlay-settings.json");overlaySettings=OverlaySettings.Load(overlaySettingsPath);
         overlaySettingsLoading=true;
         try{
-            OverlayAutoStart.IsOn=overlaySettings.AutoStart;OverlayCorner.Items.Clear();
+            OverlayAutoStart.IsOn=overlaySettings.AutoStart;OverlaySmoothUpdates.IsOn=overlaySettings.SmoothUpdates;OverlayCorner.Items.Clear();
             foreach(var (tag,label) in OverlaySettings.Corners)OverlayCorner.Items.Add(new ComboBoxItem{Content=label,Tag=tag});
             OverlayCorner.SelectedItem=OverlayCorner.Items.OfType<ComboBoxItem>().First(i=>(string)i.Tag==overlaySettings.Corner);
         }finally{overlaySettingsLoading=false;}
@@ -1251,14 +1247,14 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
     }
     async void OverlaySettingChanged(object sender,RoutedEventArgs e){
         if(overlaySettingsLoading)return;
-        string corner=OverlayCorner.SelectedItem is ComboBoxItem {Tag:string tag}?tag:"top-right";bool moved=corner!=overlaySettings.Corner;
-        overlaySettings=new(OverlayAutoStart.IsOn,corner);
+        string corner=OverlayCorner.SelectedItem is ComboBoxItem {Tag:string tag}?tag:"top-right";bool moved=corner!=overlaySettings.Corner;bool cadenceChanged=OverlaySmoothUpdates.IsOn!=overlaySettings.SmoothUpdates;
+        overlaySettings=new(OverlayAutoStart.IsOn,corner,OverlaySmoothUpdates.IsOn);
         try{overlaySettings.Save(overlaySettingsPath);}catch(Exception error) when (error is IOException or UnauthorizedAccessException){Log("On-screen stats setting could not be saved: "+error.Message);}
         if(overlaySettings.AutoStart)overlayWatchTimer.Start();else overlayWatchTimer.Stop();
         // The overlay reads its corner when it starts: reopen a running one in the new place.
-        if(moved&&MonitorRunning&&games.FirstOrDefault(g=>g.Key==monitorGameKey) is {} shown){try{await StartCacheMonitor(shown,ReceiptMiB(shown));}catch(Exception error){Log("On-screen stats could not move: "+error.Message);}}
+        if((moved||cadenceChanged)&&MonitorRunning&&games.FirstOrDefault(g=>g.Key==monitorGameKey) is {} shown){try{await StartCacheMonitor(shown,ReceiptMiB(shown));}catch(Exception error){Log("On-screen stats could not move: "+error.Message);}}
         else if(overlaySettings.AutoStart)await WatchForGames();
-        FooterStatus.Text=moved?"On-screen stats: "+OverlaySettings.Corners.First(c=>c.Tag==corner).Label.ToLowerInvariant():overlaySettings.AutoStart?"On-screen stats open when a set-up game starts":"On-screen stats open only from a game's page";footerStatusTimer.Stop();footerStatusTimer.Start();
+        FooterStatus.Text=cadenceChanged?(overlaySettings.SmoothUpdates?"Smooth overlay updates on":"Smooth overlay updates off"):moved?"On-screen stats: "+OverlaySettings.Corners.First(c=>c.Tag==corner).Label.ToLowerInvariant():overlaySettings.AutoStart?"On-screen stats open when a set-up game starts":"On-screen stats open only from a game's page";footerStatusTimer.Stop();footerStatusTimer.Start();
     }
     void OverlayCornerChanged(object sender,SelectionChangedEventArgs e)=>OverlaySettingChanged(sender,new RoutedEventArgs());
     async void LaunchGame(object sender,RoutedEventArgs e) {
@@ -1421,8 +1417,9 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
     //   game folder unknown              -> off, disabled  "Start the game once in DirectX 12 so Arc Cache can find its folder."
     //   a step is running                -> as is, disabled "Wait for the current step to finish."
     //   game running                     -> as is, disabled "Close the game to change this."
-    //   driver copy, older recorder in   -> on, enabled    "…stops the game from starting. Turn this off."
-    //   driver copy, SCSKiller's older   -> off, disabled  "This SCSKiller's recorder can't run beside a driver copy…"
+    //   driver copy, older recorder in   -> on, enabled    "…stops the game from starting. Turn this off and on."
+    //   driver copy, adapter missing    -> off, disabled  "Reinstall Arc Cache to get its local recorder adapter."
+    //   driver copy, adapted recorder   -> on, enabled    "Your supplied recorder, adapted locally…"
     //   installed / not                  -> on / off       what it does
     bool scsRecorderRendering;
     const string RecorderUse="It gives on-screen stats their frame-time graph and notes the shaders the game creates for the next shader preparation.";
@@ -1430,21 +1427,22 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
     void RenderScsRecorder(){
         if(ScsRecorder==null)return;
         string? exe=selected?.SupportedExecutable;bool installed=ScsKillerBridge.RecorderInstalled(exe),running=exe!=null&&GameProcessRunning(exe),copy=exe!=null&&HasDriverCopy(exe);
-        // an official recorder runs beside a driver copy only chained to a copy of Windows' d3d12.dll (RecorderAsync sets it up)
-        bool brokenBesideCopy=copy&&installed&&!ScsKillerBridge.InstalledRecorderDotLocalAware(exe)&&!ScsKillerBridge.ChainedToSystem(exe);
+        bool compatibleInstalled=ScsKillerBridge.InstalledRecorderDotLocalAware(exe);
+        bool brokenBesideCopy=copy&&installed&&!compatibleInstalled;
         string? blocked=scs?.CliPath==null?"Choose SCSKiller in Settings first.":selected?.Source!="Steam"?"Only for Steam games.":exe==null?"Start the game once in DirectX 12 so Arc Cache can find its folder."
-            :busy||scsRunning?"Wait for the current step to finish.":running?"Close the game to change this.":null;
+            :busy||scsRunning?"Wait for the current step to finish.":running?"Close the game to change this.":copy&&!installed&&!ScsKillerBridge.IsDotLocalAware(scs?.RecorderSource())&&ScsKillerBridge.RecorderLoaderSource==null?"Reinstall Arc Cache to get its local recorder adapter.":null;
         scsRecorderRendering=true;try{ScsRecorder.IsOn=installed;}finally{scsRecorderRendering=false;}
         ScsRecorder.IsEnabled=blocked==null&&!developerMyGamesPreview;
         ScsRecorderText.Text=blocked??(brokenBesideCopy?"This recorder isn't set up for this game's driver copy and stops the game from starting. Turn this off and on again to set it up."
-            :installed?"SCSKiller's recorder is in this game's folder. "+RecorderUse:"Puts SCSKiller's recorder (a d3d12.dll) in this game's folder. "+RecorderUse);
+            :installed?(exe!=null&&LocalRecorderAdapter.IsAdapted(Path.Combine(Path.GetDirectoryName(exe)!,"d3d12.dll"))?"Your supplied SCSKiller recorder is in this game's folder, adapted locally for its driver copy. ":"SCSKiller's recorder is in this game's folder. ")+RecorderUse
+            :(copy?"Sets up your selected SCSKiller's recorder for this driver copy using a local adapter. ":"Puts SCSKiller's recorder (a d3d12.dll) in this game's folder. ")+RecorderUse);
     }
     // Blocked by an older SCSKiller recorder: the selected SCSKiller replaces it with its exe.local-aware one ("record
     // install" updates an older recorder of its own), then the game is checked again.
     async void UpdateBlockingRecorder(){
         if(PreviewOnlyFeedback()||selected is not SteamGame game||scs==null||busy)return;
-        if(!await Confirm("Use Arc Cache's recorder",$"Replace SCSKiller's recorder in {game.Name}'s folder with the one from Arc Cache's SCSKiller? It records the same way and also runs beside a driver copy. If the official SCSKiller app later installs a newer version of its own, Arc Cache shows this again.","Replace"))return;
-        await Run($"Replacing SCSKiller's recorder for {game.Name}…",async()=>{
+        if(!await Confirm("Set up recorder",$"Set up your selected SCSKiller's recorder for {game.Name}'s driver copy? When needed, Arc Cache adapts a local copy. Your supplied original, permission checks and settings stay intact.","Set up"))return;
+        await Run($"Setting up SCSKiller's recorder for {game.Name}…",async()=>{
             if(GameProcessRunning(game.SupportedExecutable))throw new InvalidOperationException("Close the game first.");
             var lines=new System.Collections.Concurrent.ConcurrentQueue<string>();
             int code=await scs.RecorderAsync(game.AppId,true,line=>{lines.Enqueue(line);DispatcherQueue.TryEnqueue(()=>Log(line));},CancellationToken.None,game.SupportedExecutable);
@@ -1519,6 +1517,7 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
         Log($"SCSKiller status for {game.Name}: "+string.Join(" | ",ScsDetailLines(game)));
         try{ScsPresentation.SaveStatuses(scsStatusPath!,scsStatuses);}catch(Exception e) when (e is IOException or UnauthorizedAccessException){Log("SCSKiller status could not be saved: "+e.Message);}
     }
+    ScsPreparationState ScsPreparation()=>ScsPreparationState.From(selected?.Source=="Steam",scs?.CliPath!=null,busy||scsRunning,selectedReceipt?.MiB??512,setupState?.Configured==true&&setupState.ContentsValid&&recordValid&&receiptValid,ReceiptLoadVerified(),CreateScsPrivateWarm()!=null,scsInfo?.PrivateDriverSupport==true);
     PrivateDriverWarm? CreateScsPrivateWarm(){
         if(selected?.Source!="Steam"||selected.SupportedExecutable is not string exe||setupState?.Configured!=true||!setupState.ContentsValid||!recordValid||!receiptValid||selectedReceipt?.MiB is not >512||!ReceiptLoadVerified())return null;
         string? driver=selectedReceipt.Files.Keys.FirstOrDefault(n=>n.StartsWith("igd12um64xe",StringComparison.OrdinalIgnoreCase)&&n.EndsWith(".dll",StringComparison.OrdinalIgnoreCase));
@@ -1529,6 +1528,7 @@ bool checking=pageState.CheckState is GraphicsCheckState.NotRun or GraphicsCheck
     async Task RunScs(string action) {
         if(selected==null||scs==null||busy)return;
         if(selected.Source!="Steam"){Log("SCSKiller integration currently requires a Steam game.");return;}SteamGame game=selected;
+        if(action=="compile"&&ScsPreparation() is {CanCompile:false} blockedPreparation){GlobalNotice.Title="Before preparing shaders";GlobalNotice.Message=blockedPreparation.Summary;GlobalNotice.IsOpen=true;return;}
         PrivateDriverWarm? privateWarm=action=="compile"?CreateScsPrivateWarm():null;
         if(action=="compile"&&selectedReceipt?.MiB>512){await RefreshScsInfo();if(ScsToolBlock() is {} block){GlobalNotice.Severity=InfoBarSeverity.Warning;GlobalNotice.Title="This SCSKiller can't use the driver copy";GlobalNotice.Message=block;GlobalNotice.IsOpen=true;return;}}
         if(action=="compile"&&setupState?.Configured==true&&selectedReceipt?.MiB>512&&privateWarm==null){GlobalNotice.Severity=InfoBarSeverity.Warning;GlobalNotice.Title="Driver copy needs attention";GlobalNotice.Message="Arc Cache could not verify this game's larger driver copy. No shader compile was started. Fix the setup or return this game to Default.";GlobalNotice.IsOpen=true;return;}

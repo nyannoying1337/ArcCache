@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
@@ -195,7 +195,7 @@ class Worker {
         foreach(int mib in new[]{512,1024,2048,4096,8192,16384}){string key=mib.ToString(System.Globalization.CultureInfo.InvariantCulture);bool canBuild;buildable[mib]=report.Buildable.TryGetValue(key,out canBuild)&&canBuild;try{string proof=DriverTrial.FindSuccessful(probe,mib,Path.GetFileName(file));if(proof!=null){passed.Add(mib);successful=proof;}}catch{}}
         return DriverCatalog.LimitCapabilities(buildable,passed,"This driver file's cache code wasn't recognised.");
     }
-    static object ValidateForLaunch(Request r){var receipt=MatchedSet.Read(r.ReceiptPath);MatchedSet.ValidateContents(receipt);MatchedSet.ValidateGame(receipt.Executable,receipt.Game);MatchedSet.RequireDebugCompatibility(receipt);if(receipt.Schema==5)MatchedSet.RequireTrialCurrent(receipt);else {string reason;if(!DriverCatalog.CohortQualified(DriverCatalog.Selected(),out reason))throw new InvalidDataException("Check your updated graphics driver or use default settings for this game.");}return new{Ready=true,Trial=receipt.Schema==5};}
+    static object ValidateForLaunch(Request r){var receipt=MatchedSet.Read(r.ReceiptPath);MatchedSet.ValidateContents(receipt);MatchedSet.ValidatePreservedGameLibraries(receipt);MatchedSet.ValidateGame(receipt.Executable,receipt.Game);MatchedSet.RequireDebugCompatibility(receipt);if(receipt.Schema==5)MatchedSet.RequireTrialCurrent(receipt);else {string reason;if(!DriverCatalog.CohortQualified(DriverCatalog.Selected(),out reason))throw new InvalidDataException("Check your updated graphics driver or use default settings for this game.");}return new{Ready=true,Trial=receipt.Schema==5};}
     static string ActivePackage(){var p=DriverCatalog.Selected();if(p==null)throw new InvalidOperationException("No active Intel display package was found.");return p.Folder;}
     static object DriverIdentity(){var p=DriverCatalog.Selected();return new{IdentityTag=DriverCatalog.Identity(p),Adapter=p==null?null:p.Adapter,Version=p==null?null:p.Version,DriverFolder=p==null?null:p.Folder};}
     static object Status(bool signatures=false) {
@@ -255,13 +255,14 @@ class Worker {
     [STAThread]static int Main(string[] args) {
         try {
             // --cache-monitor exe [cacheMiB] [linkedFile|-] [expectedBytes] [game name] [corner]
-            if((args.Length>=2&&args.Length<=7)&&args[0]=="--cache-monitor") {
+            if((args.Length>=2&&args.Length<=8)&&args[0]=="--cache-monitor") {
                 MatchedSet.ValidateGame(args[1],null,false);System.Windows.Forms.Application.EnableVisualStyles(); // only watches: a mod beside the exe doesn't block it
                 int recordedMiB=512;if(args.Length>=3&&!Int32.TryParse(args[2],out recordedMiB))throw new InvalidDataException("Invalid cache-size receipt value.");
                 string linkedFile=args.Length>=4&&args[3]!="-"?args[3]:null;if(linkedFile!=null&&!System.Text.RegularExpressions.Regex.IsMatch(linkedFile,"^[0-9A-Fa-f]{64}$"))throw new InvalidDataException("Invalid cache file name.");
                 long expectedBytes=0;if(args.Length>=5&&(!Int64.TryParse(args[4],System.Globalization.NumberStyles.None,System.Globalization.CultureInfo.InvariantCulture,out expectedBytes)||expectedBytes>(1L<<40)))throw new InvalidDataException("Invalid expected cache size.");
-                string gameName=args.Length>=6?args[5]:null;string place=args.Length==7?args[6]:"top-right";if(!new[]{"top-right","top-left","bottom-right","bottom-left"}.Contains(place))throw new InvalidDataException("Invalid overlay corner.");if(gameName!=null&&(gameName.Length>200||gameName.Any(Char.IsControl)))throw new InvalidDataException("Invalid game name.");
-                System.Windows.Forms.Application.Run(new CacheMonitor(args[1],delegate(string path){return recordedMiB==512?"Default cache size from the game setup record":(recordedMiB/1024.0).ToString("0.##",System.Globalization.CultureInfo.InvariantCulture)+" GiB from the game setup record";},null,null,linkedFile,recordedMiB,expectedBytes,gameName,place));return 0;
+                string gameName=args.Length>=6?args[5]:null;string place=args.Length>=7?args[6]:"top-right";if(!new[]{"top-right","top-left","bottom-right","bottom-left"}.Contains(place))throw new InvalidDataException("Invalid overlay corner.");if(gameName!=null&&(gameName.Length>200||gameName.Any(Char.IsControl)))throw new InvalidDataException("Invalid game name.");
+                bool smooth=args.Length==8&&args[7]=="smooth";if(args.Length==8&&args[7]!="smooth"&&args[7]!="standard")throw new InvalidDataException("Invalid overlay update mode.");
+                System.Windows.Forms.Application.Run(new CacheMonitor(args[1],delegate(string path){return recordedMiB==512?"Default cache size from the game setup record":(recordedMiB/1024.0).ToString("0.##",System.Globalization.CultureInfo.InvariantCulture)+" GiB from the game setup record";},null,null,linkedFile,recordedMiB,expectedBytes,gameName,place,smooth));return 0;
             }
             string input=Console.In.ReadToEnd();if(input.Length>65536)throw new InvalidDataException("Request is too large.");
             var r=Json.Deserialize<Request>(input);if(r==null)throw new InvalidDataException("Request is empty.");

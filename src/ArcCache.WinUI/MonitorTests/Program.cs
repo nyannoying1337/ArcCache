@@ -12,8 +12,18 @@ class CacheMonitorTests {
             +(loadEnd-500).ToString(System.Globalization.CultureInfo.InvariantCulture)+",G,0,0,40.0,def,0.1,5,1\n");
     }
     static IEnumerable<int> Durations(){for(int i=0;i<300;i++)yield return 16;yield return 120;for(int i=0;i<200;i++)yield return 16;yield return 80;yield return 1500;for(int i=0;i<400;i++)yield return 16;}
-    [STAThread]static void Main(string[] args){string root=Path.Combine(Path.GetTempPath(),"ArcCacheMonitorTest-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
+    [STAThread]static void Main(string[] args){
+        if(args.Length==2&&args[0]=="--replay-recorder"){
+            var replay=new StutterFeed(args[1],0);replay.Update();Check(replay.Active,"Existing recorder frame data is readable");
+            Console.WriteLine("Recorder replay succeeded; no game or recorder files changed.");return;
+        }
+        string root=Path.Combine(Path.GetTempPath(),"ArcCacheMonitorTest-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
         try {File.WriteAllBytes(Path.Combine(root,"a"),new byte[100]);var initial=CacheSnapshot.Read(root);Check(initial.Bytes==100&&initial.Files==1&&initial.Unreadable==0,"Initial file size measured");
+            Check(ArcCache.Core.RecorderSettings.FromLines(new[]{"traversal_suballocate=1"},true).TraversalText=="On","Overlay shows traversal On from the recorder setting");
+            Check(ArcCache.Core.RecorderSettings.FromLines(new[]{"traversal_suballocate=0"},true).TraversalText=="Off","Overlay shows traversal Off from the recorder setting");
+            Check(ArcCache.Core.RecorderSettings.FromLines(new[]{"traversal_suballocate=1"},false).TraversalText=="No recorder","Stale settings never claim a recorder is enabled");
+            Check(ArcCache.Core.RecorderSettings.FromLines(new[]{";traversal_suballocate=1","traversal_suballocate=broken"},true).TraversalEnabled==null,"Invalid traversal setting is unavailable");
+            Check(ArcCache.Core.RecorderSettings.FromLines(new[]{"traversal_suballocate=1","traversal_suballocate=0"},true).TraversalText=="Off","Last traversal value wins consistently in the page and overlay");
             Check(CacheSnapshot.Read(root).ChangedSince(initial)==0,"Idle cache reports zero change");
             File.WriteAllBytes(Path.Combine(root,"a"),new byte[150]);File.WriteAllBytes(Path.Combine(root,"b"),new byte[20]);var grown=CacheSnapshot.Read(root);Check(grown.Bytes-initial.Bytes==70&&grown.ChangedSince(initial)==2,"Growth includes new and enlarged files");
             File.Delete(Path.Combine(root,"a"));var shrunk=CacheSnapshot.Read(root);Check(shrunk.Bytes-initial.Bytes==-80&&shrunk.ChangedSince(initial)==2,"Eviction reports signed net decrease");
@@ -31,10 +41,14 @@ class CacheMonitorTests {
             string ff7=@"C:\Program Files (x86)\Steam\steamapps\common\FINAL FANTASY VII REMAKE\End\Binaries\Win64";
             if(File.Exists(Path.Combine(ff7,"scskiller_frames.bin"))){var real=new StutterFeed(ff7,0);real.Update();Console.WriteLine("FF7 recording: active "+real.Active+", "+real.ShaderStutters+" shader stutters, worst "+real.WorstMs.ToString("0")+" ms, "+real.Fps.ToString("0")+" fps, "+real.Recent().Count+" slow frames in its last 60 s");Check(real.Active,"Recorder: a real recording reads");}
             if(args.Length==1){
-                using(var overlay=new CacheMonitor(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,null,root,Path.Combine(root,"logs"),null,16384,871L<<20,"Ready or Not")){
+                using(var overlay=new CacheMonitor(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,null,root,Path.Combine(root,"logs"),null,16384,871L<<20,"Ready or Not","top-right",true)){
                     using(var preview=overlay.PreviewImage()){preview.Save(Path.ChangeExtension(args[0],".growth.png"));Check(overlay.StatusText.Length>0&&overlay.Text.Contains("Ready or Not"),"Overlay renders the game name and a status");}
                     WriteRecording(game,unix,true);overlay.feed=new StutterFeed(game,unix-60000);
-                    using(var preview=overlay.PreviewImage()){preview.Save(args[0]);Check(preview.Height>overlay.HeightFor(false)-1,"Overlay grows for the frame-time graph");}
+                    using(var preview=overlay.PreviewImage(ArcCache.Core.RecorderSettings.FromLines(new[]{"traversal_suballocate=1"},true))){preview.Save(args[0]);Check(preview.Height>overlay.HeightFor(false)-1&&overlay.recorderSettings.TraversalText=="On","Overlay renders traversal On with the frame-time graph");}
+                    int samples=overlay.DiskSampleCount;long logBytes=0;foreach(string f in Directory.GetFiles(Path.Combine(root,"logs")))logBytes+=new FileInfo(f).Length;
+                    for(int i=0;i<20;i++)overlay.FastTick();long after=0;foreach(string f in Directory.GetFiles(Path.Combine(root,"logs")))after+=new FileInfo(f).Length;
+                    Check(overlay.DiskSampleCount==samples&&after==logBytes,"Smooth refresh does not repeat disk samples or CSV writes");
+                    Check(feed.VisualAdvanceMilliseconds>=0&&feed.VisualAdvanceMilliseconds<=1000,"Smooth graph motion is bounded between actual recorder samples");
                 }
             }
             Check(CacheMonitor.Amount(528L<<20)=="528 MB"&&CacheMonitor.Amount(2900L<<20)=="2.8 GB","Overlay sizes use the app's format");Check(CacheSnapshot.Read(Path.Combine(root,"missing")).Unreadable==1,"Missing folder reports read failure");

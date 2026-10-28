@@ -91,14 +91,42 @@ static class Tests {
         }
     }
     static int Main(string[] args) {
+        if(args.Length==1&&args[0]=="--game-libraries-tests"){
+            string dir=Path.Combine(Path.GetTempPath(),"ArcGameLibraries-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(dir);
+            try {
+                var package=new Dictionary<string,string>{{"igxess.dll",new string('A',64)},{"igd12um64xe2.dll",new string('B',64)},{"XeFX.dll",new string('C',64)}};
+                string sdk=Path.Combine(dir,"igxess.dll");File.WriteAllText(sdk,"game-owned XeSS version");
+                File.WriteAllText(Path.Combine(dir,"XeFX.dll"),"game-owned XeFX version");
+                var kept=MatchedSet.PreserveGameLibraries(dir,package);Check(kept.Count==2&&kept["igxess.dll"]==IsolationControl.FileHash(sdk)&&kept["XeFX.dll"]==IsolationControl.FileHash(Path.Combine(dir,"XeFX.dll")),"Bundled SDKs must be recorded with their own hashes");
+                Check(package.Count==3&&package["igxess.dll"]==new string('A',64)&&File.ReadAllText(sdk)=="game-owned XeSS version","Driver proof and bundled SDK must remain unchanged");
+                var receipt=new MatchedSetReceipt{Executable=Path.Combine(dir,"game.exe"),PreservedGameLibraries=kept};MatchedSet.ValidatePreservedGameLibraries(receipt);
+                File.WriteAllText(sdk,"updated game SDK");Reject(()=>MatchedSet.ValidatePreservedGameLibraries(receipt));
+                File.WriteAllText(Path.Combine(dir,"igd12um64xe2.dll"),"foreign graphics driver");Reject(()=>MatchedSet.PreserveGameLibraries(dir,package));
+                Console.WriteLine("PASS bundled XeSS preservation, changed-library detection and graphics-driver conflict refusal");return 0;
+            }finally{Directory.Delete(dir,true);}
+        }
         string isolatedTrialRoot=null;
         try {
-            if(args.Length==1&&args[0]=="--isolation-proxy-tests"){
+            if((args.Length==1||args.Length==2)&&args[0]=="--isolation-proxy-tests"){
                 string root=Path.Combine(Path.GetTempPath(),"ArcCacheIsolationTests-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
                 try{string exe=Path.Combine(root,"game.exe");File.WriteAllText(exe,"fixture");foreach(string name in new[]{"d3d12.dll","dxgi.dll","winhttp.dll","version.dll"}){string proxy=Path.Combine(root,name);File.WriteAllText(proxy,"fixture proxy");Check(Isolation.LocalDirectXProxy(exe)==proxy,"Failed to identify "+name);try{Isolation.RequireNoLocalD3D12(exe);throw new Exception("Accepted local "+name);}catch(InvalidDataException){}File.Delete(proxy);}
                     // A game's own copy of a Microsoft runtime is that DLL, not a stand-in; a DLL no Windows DLL is named like isn't either.
                     File.Copy(Path.Combine(Environment.SystemDirectory,"msvcp140.dll"),Path.Combine(root,"msvcp140.dll"));File.WriteAllText(Path.Combine(root,"steam_api64.dll"),"fixture");
                     Check(Isolation.LocalDirectXProxy(exe)==null,"A game's Microsoft runtime copy or its own DLL was taken for a stand-in.");
+                    if(args.Length==2){
+                        string recorder=Path.Combine(root,"d3d12.dll"),chain=Path.Combine(root,"d3d12.scskiller-next.dll"),ini=Path.Combine(root,"scskiller.ini");
+                        File.Copy(args[1],recorder);File.Copy(Path.Combine(Environment.SystemDirectory,"d3d12.dll"),chain);
+                        Check(Isolation.LocalDirectXProxy(exe)==chain,"A missing ini must not allow the chain.");
+                        File.WriteAllText(ini,"[scskiller]\r\nnext=d3d12.scskiller-next.dll\r\n");
+                        Reject(()=>Isolation.RequireNoLocalD3D12(exe));
+                        File.Delete(chain);
+                        Check(Isolation.DotLocalAwareRecorder(recorder)&&Isolation.LocalD3D12(exe)==null&&Isolation.LocalDirectXProxy(exe)==null,"The compatible recorder without a chain must pass both guards.");
+                        Isolation.RequireNoLocalD3D12(exe);
+                        string mod=Path.Combine(root,"dxgi.dll");File.WriteAllText(mod,"foreign proxy");Reject(()=>Isolation.RequireNoLocalD3D12(exe));File.Delete(mod);
+                        File.WriteAllText(chain,"foreign chain");Reject(()=>Isolation.RequireNoLocalD3D12(exe));File.Delete(chain);
+                        File.WriteAllText(recorder,"foreign recorder");Reject(()=>Isolation.RequireNoLocalD3D12(exe));
+                        Console.WriteLine("PASS recorder compatibility: compatible recorder passes; Windows chain, foreign chain, foreign recorder and additional DXGI proxy block.");
+                    }
                     string foreign=exe+".local";Directory.CreateDirectory(foreign);Check(Isolation.LocalPrivatePath(exe)==foreign,"Failed to identify foreign .local directory");Console.WriteLine("PASS stand-ins for Windows DLLs (d3d12, dxgi, winhttp, version) and foreign .local blockers; runtime copies pass; no game files accessed.");return 0;}
                 finally{if(Directory.Exists(root))Directory.Delete(root,true);}
             }

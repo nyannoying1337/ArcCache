@@ -41,6 +41,9 @@ class CacheSnapshot {
 // Under it: the cache file bar (share of the game's cache size, a tick at SCSKiller's expected size) and one footer line.
 enum OverlayTone {Wait,Good,Warn,Info}
 class CacheMonitor : Form {
+    readonly bool smoothUpdates;readonly Timer animationTimer=new Timer();readonly Stopwatch animationClock=Stopwatch.StartNew();long nextRecorderRead;
+    internal int DiskSampleCount {get{return sampleCount;}}
+    internal ArcCache.Core.RecorderSettings recorderSettings=ArcCache.Core.RecorderSettings.FromLines(new string[0],false);
     readonly string executable,root,log,displayName;readonly CacheSnapshot initial;readonly Timer timer=new Timer();int gamePid;DateTime started;int sampleCount;string driverStatus="Driver: not checked";string observedModulePath;readonly Func<string,string> inspectDriver;readonly string cacheFile;readonly long limitBytes,expectedBytes;readonly int limitMiB;readonly string corner;readonly DateTime monitorStarted=DateTime.Now;
     // The last sample, drawn by OnPaint. The status also goes to the window title for screen readers.
     OverlayTone tone=OverlayTone.Wait;string status="Checking the driver…",fileSize,growthText,footer="";long fileBytes=-1;bool loggingFailed;float scale=1;
@@ -64,7 +67,8 @@ class CacheMonitor : Form {
     // most since the overlay started is shown as the likely one. limitMiB: the game's cache size from its setup record.
     // expected: SCSKiller's estimated cache size from the game's last check (0 = none). name: the game's name for the header.
     // place: the game window's corner (top-right, top-left, bottom-right, bottom-left); click-through, so it isn't dragged.
-    public CacheMonitor(string exe,Func<string,string> inspect=null,string cacheRoot=null,string logFolder=null,string linkedCacheFile=null,int limitMiB=512,long expected=0,string name=null,string place="top-right") {
+    public CacheMonitor(string exe,Func<string,string> inspect=null,string cacheRoot=null,string logFolder=null,string linkedCacheFile=null,int limitMiB=512,long expected=0,string name=null,string place="top-right",bool smooth=false) {
+        smoothUpdates=smooth;
         corner=place=="top-left"||place=="bottom-right"||place=="bottom-left"?place:"top-right";
         inspectDriver=inspect;cacheFile=linkedCacheFile!=null&&linkedCacheFile.Length==64&&System.Text.RegularExpressions.Regex.IsMatch(linkedCacheFile,"^[0-9A-Fa-f]{64}$")?linkedCacheFile:null;this.limitMiB=Math.Max(512,limitMiB);limitBytes=(long)this.limitMiB<<20;expectedBytes=Math.Max(0,expected);
         executable=Path.GetFullPath(exe);root=cacheRoot??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),"AppData","LocalLow","Intel","ShaderCache");
@@ -77,7 +81,9 @@ class CacheMonitor : Form {
         FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;TopMost=true;BackColor=Panel;Opacity=0.92;DoubleBuffered=true;Text="Arc Cache";
         ReadAccent();feed=new StutterFeed(Path.GetDirectoryName(executable),new DateTimeOffset(started.ToUniversalTime()).ToUnixTimeMilliseconds()-5000);
         ClientSize=new Size(S(296),HeightFor(false));
-        timer.Interval=2000;timer.Tick+=delegate{Sample();};Shown+=delegate{Sample();timer.Start();};FormClosed+=delegate{timer.Dispose();};
+        timer.Interval=2000;timer.Tick+=delegate{Sample();};
+        animationTimer.Interval=50;animationTimer.Tick+=delegate{FastTick();};
+        Shown+=delegate{Sample();timer.Start();if(smoothUpdates)animationTimer.Start();};FormClosed+=delegate{timer.Dispose();animationTimer.Dispose();};
     }
     protected override void OnHandleCreated(EventArgs e){
         base.OnHandleCreated(e);
@@ -141,6 +147,8 @@ class CacheMonitor : Form {
             string right=marker?"tick: "+Amount(expectedBytes)+" expected":fileBytes>0?(fileBytes*100.0/limitBytes).ToString("0",CultureInfo.InvariantCulture)+"%":"";
             var rightSize=TextRenderer.MeasureText(g,right,tiny,Size.Empty,TextFormatFlags.NoPadding);TextRenderer.DrawText(g,right,tiny,new Point((int)(x+w-rightSize.Width),(int)y),Text3,TextFormatFlags.NoPadding);
             y+=S(18);
+            SectionTitle(g,x,y,w,small,"Traversal stutter fix",recorderSettings.TraversalText,Text2);
+            y+=S(24);
             if(feed!=null&&feed.Active)DrawFrames(g,x,y,w,tiny);else DrawGrowth(g,x,y,w,tiny);
             // Footer.
             y=height-S(33);using(var p=new Pen(Mix(Color.White,0.07)))g.DrawLine(p,x,y,x+w,y);
@@ -162,17 +170,20 @@ class CacheMonitor : Form {
         const double Top=150;Func<double,float> Y=delegate(double ms){return y+h-S(2)-(float)(Math.Min(ms,Top)/Top)*(h-S(6));};
         using(var dash=new Pen(Mix(Color.White,0.2)){DashPattern=new[]{3f,3f}})g.DrawLine(dash,x,Y(StutterFeed.HitchMs),x+w,Y(StutterFeed.HitchMs));
         var label=TextRenderer.MeasureText(g,"50 ms",tiny,Size.Empty,Tight);TextRenderer.DrawText(g,"50 ms",tiny,new Point((int)(x+S(4)),(int)(Y(StutterFeed.HitchMs)-label.Height-S(1))),Text3,Tight);
+        float drift=smoothUpdates?w*(float)(feed.VisualAdvanceMilliseconds/60000.0):0;
+        var saved=g.Save();g.SetClip(box);
         double[] columns=feed.Columns(120);var points=new List<PointF>();
         using(var pen=new Pen(accent,Math.Max(1f,scale*1.4f)){LineJoin=System.Drawing.Drawing2D.LineJoin.Round}){
             for(int i=0;i<=columns.Length;i++){
-                if(i<columns.Length&&columns[i]>=0){points.Add(new PointF(x+w*i/(columns.Length-1),Y(columns[i])));continue;}
+                if(i<columns.Length&&columns[i]>=0){points.Add(new PointF(x+w*i/(columns.Length-1)-drift,Y(columns[i])));continue;}
                 if(points.Count>1)g.DrawLines(pen,points.ToArray());points.Clear();
             }
         }
         foreach(var hitch in feed.Recent()){
-            float hx=x+w*(float)hitch.Position,r=S(2.5f);
+            float hx=x+w*(float)hitch.Position-drift,r=S(2.5f);
             using(var b=new SolidBrush(hitch.Shader?Critical:OtherHitch))g.FillEllipse(b,hx-r,Y(hitch.Ms)-r,r*2,r*2);
         }
+        g.Restore(saved);
     }
     // Without the recorder: a mark for every sample in the last 60 s in which the game's cache file grew (new shaders).
     void DrawGrowth(Graphics g,float x,float y,float w,Font tiny){
@@ -187,8 +198,8 @@ class CacheMonitor : Form {
     }
     const float GraphHeight=46,StripHeight=18;
     // The footer sits 10 px under the graph or strip: 170 px of card around it.
-    internal int HeightFor(bool frames){return S(170+(frames?GraphHeight:StripHeight));}
-    internal Bitmap PreviewImage(){Sample();ClientSize=new Size(S(296),HeightFor(feed!=null&&feed.Active));var image=new Bitmap(ClientSize.Width,ClientSize.Height);using(var g=Graphics.FromImage(image))Draw(g,image.Width,image.Height);return image;}
+    internal int HeightFor(bool frames){return S(194+(frames?GraphHeight:StripHeight));}
+    internal Bitmap PreviewImage(ArcCache.Core.RecorderSettings previewSettings=null){Sample();if(previewSettings!=null)recorderSettings=previewSettings;ClientSize=new Size(S(296),HeightFor(feed!=null&&feed.Active));var image=new Bitmap(ClientSize.Width,ClientSize.Height);using(var g=Graphics.FromImage(image))Draw(g,image.Width,image.Height);return image;}
     internal string StatusText {get{return status;}}
     // The file the game has open, else the saved link, else the file that grew most since the overlay started.
     string CacheName(CacheSnapshot now) {
@@ -234,18 +245,31 @@ class CacheMonitor : Form {
         int y=top?game.Top+S(42):Math.Max(game.Top,game.Bottom-Height-S(18));
         return new Point(x,y);
     }
+    void ReadFrameFeed() {
+        try{feed.Update();}catch(IOException){}catch(UnauthorizedAccessException){}
+        if(feed.Active!=showingFrames){showingFrames=feed.Active;ClientSize=new Size(S(296),HeightFor(showingFrames));}
+    }
+    void TrackGameWindow() {
+        IntPtr front=GetForegroundWindow();uint foregroundPid;GetWindowThreadProcessId(front,out foregroundPid);Rect rect;
+        if(foregroundPid==gamePid&&GetWindowRect(front,out rect)){Location=Place(rect);if(!Visible)Show();SetWindowPos(Handle,new IntPtr(-1),0,0,0,0,0x0001|0x0002|0x0010);}else if(Visible)Hide();
+    }
+    // Smooth painting never repeats cache scans, driver/module checks or CSV writes.
+    internal void FastTick() {
+        if(!smoothUpdates)return;
+        if(animationClock.ElapsedMilliseconds>=nextRecorderRead){nextRecorderRead=animationClock.ElapsedMilliseconds+250;ReadFrameFeed();TrackGameWindow();}
+        if(Visible)Invalidate();
+    }
     void Sample() {
+        recorderSettings=ArcCache.Core.RecorderSettings.Read(executable);
         long privateBytes=0,workingSet=0;
         try{using(var p=Process.GetProcessById(gamePid)){if(p.HasExited||p.StartTime!=started){Close();return;}privateBytes=p.PrivateMemorySize64;workingSet=p.WorkingSet64;
             if(sampleCount++%5==0){bool found=false;try{foreach(ProcessModule m in p.Modules)if((m.ModuleName.Equals("igd12um64xe2.dll",StringComparison.OrdinalIgnoreCase)||m.ModuleName.Equals("igd12um64xe3.dll",StringComparison.OrdinalIgnoreCase)||m.ModuleName.Equals("igd12um64xeh.dll",StringComparison.OrdinalIgnoreCase))){found=true;string path=m.FileName;if(path==observedModulePath)break;observedModulePath=path;driverStatus=path.StartsWith(executable+".local\\",StringComparison.OrdinalIgnoreCase)?"Game setup: custom copy loaded":"Game setup: normal or other copy loaded";if(inspectDriver!=null){try{driverStatus+=" · "+inspectDriver(path);}catch{driverStatus+=" · size not checked";}}break;}if(!found){driverStatus="Game setup: not confirmed";observedModulePath=null;}}catch{driverStatus="Game setup: could not be checked";observedModulePath=null;}}
         }}catch{Close();return;}
         if(sampleCount%15==0)ReadAccent();
-        try{feed.Update();}catch(IOException){}catch(UnauthorizedAccessException){}
-        if(feed.Active!=showingFrames){showingFrames=feed.Active;ClientSize=new Size(S(296),HeightFor(showingFrames));}
-        IntPtr front=GetForegroundWindow();uint foregroundPid;GetWindowThreadProcessId(front,out foregroundPid);Rect rect;
+        ReadFrameFeed();
         // Borderless games often make their own window topmost after the overlay opened (auto-start opens it at launch),
         // which buries the overlay: put it back on top each sample, without moving, sizing or activating it.
-        if(foregroundPid==gamePid&&GetWindowRect(front,out rect)){Location=Place(rect);if(!Visible)Show();SetWindowPos(Handle,new IntPtr(-1),0,0,0,0,0x0001|0x0002|0x0010);}else if(Visible)Hide();
+        TrackGameWindow();
         var now=CacheSnapshot.Read(root);long growth=now.Bytes-initial.Bytes;int changed=now.ChangedSince(initial);
         if(sampleCount%5==1)try{DetectOpenFile(now);}catch(Exception){}
         string name=CacheName(now);long size;
@@ -274,6 +298,8 @@ class CacheMonitor : Form {
 //   a compile of 10 ms or more overlaps it                       -> shader stutter
 //   else                                                         -> other hitch
 class StutterFeed {
+    long lastDataTick=Stopwatch.GetTimestamp();
+    public double VisualAdvanceMilliseconds {get{return Math.Min(1000,Math.Max(0,(Stopwatch.GetTimestamp()-lastDataTick)*1000.0/Stopwatch.Frequency));}}
     public const double HitchMs=50;
     const double WindowMs=60000,KeepMs=75000,SettleMs=3000;const long MaxCsvTail=4L<<20;
     struct Create {public double Start,End,Ms;public long Tid;public bool Presents;}
@@ -306,7 +332,7 @@ class StutterFeed {
         if(!inLaunch)return;
         ReadCreates();
         List<double> main=MainChain();if(main==null||main.Count<2)return;
-        latest=main[main.Count-1];Active=true;
+        double next=main[main.Count-1];if(next!=latest)lastDataTick=Stopwatch.GetTimestamp();latest=next;Active=true;
         Classify(main);
         int first=main.FindIndex(delegate(double t){return t>=latest-5000;});Fps=first>=0&&latest-main[first]>0?(main.Count-1-first)*1000.0/(latest-main[first]):0;
         foreach(var chain in chains.Values)chain.RemoveAll(delegate(double t){return t<latest-KeepMs;});

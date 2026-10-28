@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
@@ -11,6 +11,8 @@ public class MatchedSetReceipt {
     public int Schema {get;set;} public string Executable {get;set;} public string Folder {get;set;}
     public int MiB {get;set;} public string Status {get;set;} public Dictionary<string,string> Files {get;set;}
     public MatchedSet.ProfileInfo Game {get;set;}
+    // Game-owned SDK libraries are recorded for launch checks, never copied or removed.
+    public Dictionary<string,string> PreservedGameLibraries {get;set;}
     public bool Trial {get;set;}public bool DebugFixed {get;set;}public string TrialReceipt {get;set;}public int TrialMiB {get;set;}public string Driver {get;set;}public string OriginalHash {get;set;}public string TrialPatchedHash {get;set;}public Dictionary<string,string> OriginalFiles {get;set;}
 }
 public static class MatchedSet {
@@ -126,7 +128,19 @@ public static class MatchedSet {
         Require(mib==512||mib==proofSize,"Test this cache size on the selected driver before applying it to a game.");
         return name.Equals(receipt.Driver,StringComparison.OrdinalIgnoreCase)?mib==512?receipt.OriginalHash:receipt.TrialPatchedHash:receipt.OriginalFiles[name];
     }
-    static Dictionary<string,string> Package(MatchedSetReceipt r){return r.Schema==5?r.OriginalFiles:Originals;}
+    static Dictionary<string,string> Package(MatchedSetReceipt r){return (r.Schema==5?r.OriginalFiles:Originals).Where(e=>r.PreservedGameLibraries==null||!r.PreservedGameLibraries.ContainsKey(e.Key)).ToDictionary(e=>e.Key,e=>e.Value,StringComparer.OrdinalIgnoreCase);}
+    internal static Dictionary<string,string> PreserveGameLibraries(string gameFolder,IDictionary<string,string> package) {
+        var preserved=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
+        foreach(var entry in package){string path=Path.Combine(gameFolder,entry.Key);if(!File.Exists(path))continue;
+            Require((entry.Key.Equals("igxess.dll",StringComparison.OrdinalIgnoreCase)||entry.Key.Equals("XeFX.dll",StringComparison.OrdinalIgnoreCase)),"Game root already contains Intel package DLL: "+entry.Key);
+            Engine.CheckPath(path);preserved.Add(entry.Key,IsolationControl.FileHash(path));
+        }
+        return preserved;
+    }
+    public static void ValidatePreservedGameLibraries(MatchedSetReceipt r) {
+        if(r.PreservedGameLibraries==null)return;
+        foreach(var entry in r.PreservedGameLibraries){string path=Path.Combine(Path.GetDirectoryName(r.Executable),entry.Key);Engine.CheckPath(path);Require(File.Exists(path)&&IsolationControl.FileHash(path)==entry.Value,"Game's bundled Intel SDK library changed. Use default settings and set up the game again.");}
+    }
     public static string OriginalDriverHash(MatchedSetReceipt r){return r.Schema==5?r.OriginalHash:Engine.Original;}
     public static string DriverName(MatchedSetReceipt r){return r.Schema==5?r.Driver:Xe2;}
     public static void RequireTrialCurrent(MatchedSetReceipt r){Require(r.Schema==5&&r.Trial,"This is not a game-trial record.");var proof=DriverTrial.VerifySuccessful(r.TrialReceipt,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"),true);int proofSize=Convert.ToInt32(proof["MiB"]);Require((r.TrialMiB==0?proofSize:r.TrialMiB)==proofSize&&(string)proof["OriginalHash"]==r.OriginalHash&&(string)proof["PatchedHash"]==r.TrialPatchedHash&&(string)proof["Driver"]==r.Driver,"The game setup belongs to a different driver-size test.");var sources=(Dictionary<string,object>)proof["Sources"];Require(sources.Count==r.OriginalFiles.Count&&r.OriginalFiles.All(e=>sources.ContainsKey(e.Key)&&(string)sources[e.Key]==e.Value),"Game trial dependencies differ from the successful test.");}
@@ -140,6 +154,7 @@ public static class MatchedSet {
             // driver; the original hash and active proof are validated separately.
             Require(r.OriginalFiles.ContainsKey(r.Driver)&&r.OriginalFiles[r.Driver]==r.OriginalHash&&r.OriginalFiles.ContainsKey("igd12umd64.dll")&&r.Game.ObservedDriverHash==r.OriginalHash,"Game trial source differs.");
             foreach(var file in r.OriginalFiles)Require(Path.GetFileName(file.Key)==file.Key&&file.Key.EndsWith(".dll",StringComparison.OrdinalIgnoreCase)&&System.Text.RegularExpressions.Regex.IsMatch(file.Value??"","\\A[0-9A-F]{64}\\z"),"Invalid trial dependency.");Require(System.Text.RegularExpressions.Regex.IsMatch(r.TrialPatchedHash??"","\\A[0-9A-F]{64}\\z"),"Invalid patched hash.");}
+        if(r.PreservedGameLibraries!=null)foreach(var entry in r.PreservedGameLibraries)Require(r.Schema==5&&(entry.Key.Equals("igxess.dll",StringComparison.OrdinalIgnoreCase)||entry.Key.Equals("XeFX.dll",StringComparison.OrdinalIgnoreCase))&&r.OriginalFiles.ContainsKey(entry.Key)&&!r.Files.ContainsKey(entry.Key)&&System.Text.RegularExpressions.Regex.IsMatch(entry.Value??"","\\A[0-9A-F]{64}\\z"),"Invalid preserved game library.");
         var package=Package(r);Require(r.Files.Count==package.Count+((r.Schema==4||r.Schema==5&&r.DebugFixed)?DebugHelpers.Count:0),"Setup membership differs.");
         string exe=Path.GetFullPath(r.Executable),folder=Path.GetFullPath(r.Folder);
         if(r.Game!=null)Require(ProfileExecutable(r.Game).Equals(exe,StringComparison.OrdinalIgnoreCase),"Receipt game profile differs from its target.");else Profile(exe);
@@ -182,18 +197,21 @@ public static class MatchedSet {
         Dictionary<string,string> package=Originals;Dictionary<string,object> proof=null;
         if(trialReceipt==null)Require(Profile(full).Schema!=2,"Use the explicit game-trial setup action for this profile.");
         if(trialReceipt!=null){Require(mib==512,"Start game trials with an unchanged copy.");proof=DriverTrial.VerifySuccessful(trialReceipt,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"),true);Require(((string)proof["SourceFolder"]).Equals(driverFolder,StringComparison.OrdinalIgnoreCase),"The selected driver differs from this test.");package=((Dictionary<string,object>)proof["Sources"]).ToDictionary(e=>e.Key,e=>(string)e.Value,StringComparer.OrdinalIgnoreCase);var trialProfile=Profile(full);ValidatePrepareObservation(trialProfile,proof);}
+        var preserved=PreserveGameLibraries(Path.GetDirectoryName(full),package);
+        Require(preserved.Count==0||trialReceipt!=null,"Game-owned SDK libraries require a tested driver-copy setup.");
         foreach(var entry in package) {
-            Require(!File.Exists(Path.Combine(Path.GetDirectoryName(full),entry.Key)),"Game root already contains Intel package DLL: "+entry.Key);
             string source=Path.Combine(driverFolder,entry.Key);Engine.CheckPath(source);Require(IsolationControl.FileHash(source)==entry.Value,"Unsupported or changed package file: "+entry.Key);
         }
         long total=0;foreach(var entry in package)total=checked(total+new FileInfo(Path.Combine(driverFolder,entry.Key)).Length);Require(new DriveInfo(Path.GetPathRoot(folder)).AvailableFreeSpace>=total+64L*1024*1024,"Not enough disk space for this game copy.");
         bool fixDebug=NeedsDebugRoutingFix(full);if(fixDebug)ValidateDebugSources();
         var gameProfile=Profile(full);
         var r=new MatchedSetReceipt{Schema=trialReceipt!=null?5:fixDebug?4:3,Trial=trialReceipt!=null,DebugFixed=fixDebug,TrialReceipt=trialReceipt,TrialMiB=proof==null?0:Convert.ToInt32(proof["MiB"]),Driver=proof==null?Xe2:(string)proof["Driver"],OriginalHash=proof==null?Engine.Original:(string)proof["OriginalHash"],TrialPatchedHash=proof==null?Engine.OneGiB:(string)proof["PatchedHash"],OriginalFiles=proof==null?null:package,Executable=full,Folder=folder,MiB=mib,Status="prepare-started",Files=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase),Game=gameProfile.Schema==1||gameProfile.Schema==2?gameProfile:null};
-        foreach(var entry in package)r.Files.Add(entry.Key,Expected(entry.Key,mib,r));if(fixDebug)foreach(var entry in DebugHelpers)r.Files.Add(entry.Key,entry.Value);Save(receiptPath,r);
+        r.PreservedGameLibraries=preserved;
+        var copyPackage=Package(r);
+        foreach(var entry in copyPackage)r.Files.Add(entry.Key,Expected(entry.Key,mib,r));if(fixDebug)foreach(var entry in DebugHelpers)r.Files.Add(entry.Key,entry.Value);Save(receiptPath,r);
         string staging=folder+".pending-"+Guid.NewGuid().ToString("N");Directory.CreateDirectory(staging);
         try {
-            foreach(var entry in package) {
+            foreach(var entry in copyPackage) {
                 byte[] bytes=File.ReadAllBytes(Path.Combine(driverFolder,entry.Key));Require(Engine.Hash(bytes)==entry.Value,"Source changed during copy.");
                 if(entry.Key.Equals(DriverName(r),StringComparison.OrdinalIgnoreCase))bytes=PatchGame(bytes,mib,r);
                 string dest=Path.Combine(staging,entry.Key);
@@ -206,12 +224,13 @@ public static class MatchedSet {
                 string dest=Path.Combine(staging,entry.Key);using(var stream=new FileStream(dest,FileMode.CreateNew,FileAccess.Write,FileShare.None)){stream.Write(bytes,0,bytes.Length);stream.Flush(true);}
                 Require(IsolationControl.FileHash(dest)==entry.Value,"Windows debug copy failed validation.");
             }
-            Closed(full);ValidateGame(full);Directory.Move(staging,folder);ValidateContents(r);r.Status="prepared-runtime-unverified";Save(receiptPath,r);
+            Closed(full);ValidateGame(full);ValidatePreservedGameLibraries(r);Directory.Move(staging,folder);ValidateContents(r);r.Status="prepared-runtime-unverified";Save(receiptPath,r);
             return "Game copy prepared: "+mib+" MiB. Runtime loading and cache effect require verification.\r\n"+folder+"\r\nRecovery receipt: "+receiptPath;
         } catch {r.Status="recovery-required";Save(receiptPath,r);throw;}
         // Failed staging is retained with pinned hashes for inspection; never recursively remove game paths.
     }
     public static string ChangeCap(string receiptPath,int mib,string backupRoot=null) {
+        ValidatePreservedGameLibraries(Read(receiptPath));
         var r=Read(receiptPath);Require(mib!=4096||r.Schema==5,"A 4 GiB copy must use its own chunked driver-copy test first.");Closed(r.Executable,r.Game);ValidateGame(r.Executable,r.Game);ValidateContents(r);RequireDebugCompatibility(r);if(r.Schema==5){RequireTrialCurrent(r);string proofPath=DriverTrial.FindSuccessful(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"),mib,r.Driver);Require(proofPath!=null,"Test "+(mib==512?"Default":(mib/1024)+" GB")+" first on this exact driver.");var proof=DriverTrial.VerifySuccessful(proofPath,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"ArcCache.DriverProbe.exe"),true);Require((string)proof["OriginalHash"]==r.OriginalHash,"This size test belongs to a different driver file.");var proofSources=(Dictionary<string,object>)proof["Sources"];Require(proofSources.Count==r.OriginalFiles.Count&&r.OriginalFiles.All(e=>proofSources.ContainsKey(e.Key)&&(string)proofSources[e.Key]==e.Value),"This size test belongs to a different driver package.");r.TrialReceipt=proofPath;r.TrialMiB=mib;r.TrialPatchedHash=(string)proof["PatchedHash"];}
         Expected(DriverName(r),mib,r);
         string target=Path.Combine(r.Folder,DriverName(r)),staging=target+".pending";Require(!File.Exists(staging),"Staged DLL already exists; recover before continuing.");

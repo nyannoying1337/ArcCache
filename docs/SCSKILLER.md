@@ -6,11 +6,11 @@ On Intel that cache is limited to 512 MB per game. A normal SCSKiller run theref
 
 ## How to use it
 
-1. Set up the game in Arc Cache and apply a size until the card shows **"Ready to play · N GB"**.
+1. Set up the game and choose a cache size. Launch it once and leave it at the menu until Arc Cache confirms that size's driver copy loaded. Gameplay recording is not required for this check.
 2. Close the game.
 3. In the **Prepare shaders with SCSKiller** card, choose **Prepare shaders…** and confirm.
 4. Watch the progress, for example *"16 GB driver copy confirmed · Compiling 41,230 / 94,165 pipelines · cache file 512 MB of 16 GB"*.
-5. Start the game. With **Show on-screen stats**, the overlay should say **"Cache use: GOOD"**.
+5. Start the game and choose **Show on-screen stats** to watch cache use. **Settings → On-screen stats → Smooth updates** enables more frequent graph refreshes. The overlay's traversal row reports the recorder setting, not measured effectiveness.
 
 **Advanced** in the same card:
 
@@ -25,9 +25,20 @@ The card shows it, for example: *"Using Arc Cache's SCSKiller · 1.2.5-arc.20261
 | SCSKiller build | Default-size games | Games with a bigger size |
 | --- | --- | --- |
 | Included with Arc Cache (`SCSKiller\cli`, from the [SCSKiller-Arc fork](https://github.com/nyannoying1337/SCSKiller)) | ✅ | ✅ compiles with the game's driver copy |
-| Official SCSKiller release, portable or beta | ✅ | ⛔ blocked |
+| Your supplied SCSKiller CLI selected in Arc Cache | Uses the included public compiler on a local data mirror | Uses the included public compiler and the verified driver copy; the supplied recorder stays local |
 
-Official builds are blocked for bigger sizes on purpose. They would compile with the normal driver, which **shrinks the game's cache back to 512 MB**.
+The supplied CLI handles its own recorder and settings. Arc Cache's public compiler handles shader preparation through a checked local data mirror. Automatic preparation refuses a compiler that cannot confirm the mirror's data isolation and recorder protection. A signed or unsupported supplied recorder is not adapted. Local compatibility has been checked with a supplied 1.4.1-alpha.2 recorder in Satisfactory and Witcher 3; this does not establish reduced traversal stutters or support for every recorder version. The public bundled recorder is not a substitute for unverified alpha/beta features.
+
+Compatible community recordings or a game-file shader plan can be prepared without making a local gameplay recording. Some versions or effects still need a recording when those sources do not contain the required pipelines.
+
+## Compatibility checks
+
+| Game | Checked configuration | Evidence and limits |
+| --- | --- | --- |
+| Satisfactory | 16 GB driver copy, locally supplied 1.4.1-alpha.2 recorder and local loader adapter | Driver-copy loading verified; responsive menu confirmed; recorder frame data readable by the overlay. Gameplay stutter reduction was not measured. |
+| Witcher 3 v5.01 DX12 | 2 GB driver copy, same supplied recorder and local adapter; bundled XeSS/XeFX libraries preserved | Driver-copy loading and launch verified; shader preparation completed 73,019 jobs with zero failures; recorder frame data readable by the overlay. The observed traversal pool placed no resources, so this is not evidence of traversal-stutter reduction. |
+
+These checks establish compatibility in those configurations, not universal game support, crash-free gameplay, or a measured performance improvement. The overlay's smooth mode is also covered by fixture checks that its fast refresh does not repeat disk samples or CSV writes.
 
 > ⚠️ **Don't compile Arc Cache games from the SCSKiller app itself** (or let its automatic re-compile after driver updates run for them) until SCSKiller supports driver copies officially. That path uses the normal driver and trims the cache to 512 MB. Arc Cache's overlay warns when this happens ("the file shrank").
 

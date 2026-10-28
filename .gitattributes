@@ -1,0 +1,2 @@
+# Keep the reviewed patch canonical; blank context lines contain a required space.
+packaging/scskiller-public-readonly-recorders.patch text eol=lf whitespace=-blank-at-eol

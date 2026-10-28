@@ -43,13 +43,13 @@ The repository also has `research/LargeCache` and its reviewed larger-patch sour
 
 `tools/claude-build.ps1` builds and tests everything in one go on a Windows PC with VS 2022 Build Tools (C++, CMake) and the .NET 10 SDK:
 
-- the SCSKiller-Arc fork from a sibling checkout `..\SCSKiller`: native warm exe and proxy (CMake), CLI, filtered tests;
+- the reviewed public SCSKiller-Arc fork from a sibling checkout `..\SCSKiller-public` (or `-ScsKillerRepository`): native warm exe and proxy (CMake), CLI, filtered tests;
 - the engine, the worker, the probe, the app and all app tests;
 - `-Release -Version 2026.10.16` additionally publishes the app (Release, x64), adds the SCSKiller CLI and native files under `SCSKiller\`, the license and runtime notices and `GETTING-STARTED.md`, and creates `out\release\ArcCache-<version>-Windows-x64.zip` with a SHA-256 file, plus the Inno Setup installer (`packaging\build-installer.ps1`) when Inno Setup's `ISCC.exe` is installed (otherwise that step is skipped with a warning).
 
 Results go to `tools\claude-build.log`. The script never runs driver tests, game setups or compiles.
 
-The bundled SCSKiller is the fork's `intel-cache-cap` branch. Arc Cache selects it automatically when no other SCSKiller was chosen. For games with a bigger size it requires `scskiller arc-cache-info` to report driver-copy support (see [SCSKiller guide](SCSKILLER.md)).
+The bundled SCSKiller is pinned to public fork revision `cf86e74e260154b1314afacac3e79052a7f44fde`, plus `packaging/scskiller-public-readonly-recorders.patch`. The source check applies only that reviewed patch to a pristine approved checkout and refuses other source changes. Payload provenance records every bundled file hash, and the installer checks it. `-LocalOnly` never permits unpublished source in a distributable payload. User-supplied recorders and local adapters remain outside release payloads. For larger cache sizes, shader preparation requires a verified driver copy and a compiler reporting driver-copy support (see [SCSKiller guide](SCSKILLER.md)).
 
 ## Documentation and preview releases
 

@@ -41,6 +41,16 @@ Test("Automatic game polling does not flash Checking or rerender unchanged resul
  Check(GamePollPolicy.ShouldRender(MyGamesLoadResult.Unknown,MyGamesLoadResult.DriverCopyLoaded),"A changed observation must update the page.");
 });
 GameLibraryTests.Run(Test,Check);
+LocalRecorderAdapterTests.Run(Test,Check);
+Test("Public compiler must confirm its isolated data directory, selected game and recorder protection",()=>{
+    string folder=Path.Combine(Path.GetTempPath(),"ArcMirrorContract");
+    string Response(string directory,uint game,bool protect)=>JsonSerializer.Serialize(new{arcDataDirectory=directory,arcReadOnlyRecorders=protect,arcSelectedGame="steam:"+game});
+    Check(ScsKillerBridge.MirrorIsolationConfirmed(Response(folder,526870,true),folder,526870),"A confirmed isolated compiler was rejected.");
+    Check(!ScsKillerBridge.MirrorIsolationConfirmed("{\"arcCacheHandoff\":1}",folder,526870),"An older CLI that ignores the data override was accepted.");
+    Check(!ScsKillerBridge.MirrorIsolationConfirmed(Response(folder+"-wrong",526870,true),folder,526870),"The compiler's wrong data directory was accepted.");
+    Check(!ScsKillerBridge.MirrorIsolationConfirmed(Response(folder,1,true),folder,526870),"The compiler's wrong selected game was accepted.");
+    Check(!ScsKillerBridge.MirrorIsolationConfirmed(Response(folder,526870,false),folder,526870),"A compiler allowed to change the live recorder was accepted.");
+});
 Check(MyGamesPageStates.StateTable.Select(r=>r.Key).Distinct(StringComparer.Ordinal).Count()==MyGamesPageStates.StateTable.Count,"My games preview keys must be unique.");
 foreach(var row in MyGamesPageStates.StateTable)Test("My games state table: "+row.Name,()=>{
  var state=MyGamesPageStates.Resolve(row.Input);
@@ -266,7 +276,7 @@ Test("SCSKiller bridge uses selected Steam ID, child-only Intel opt-in and no sh
 Test("My games: an older SCSKiller recorder offers Arc Cache's, any other mod the game folder",()=>{
     var recorder=new LocalModBlocker(@"C:\Games\FF7\Win64\d3d12.dll",ProductName:"SCSKiller",FileDescription:"SCSKiller D3D12 proxy",CompanyName:"The SCSKiller authors");
     var update=MyGamesPageStates.Resolve(new MyGamesPageInputs(ModBlocker:recorder,RecorderUpdate:true));
-    Check(update.AccentAction==MyGamesAction.UpdateRecorder&&update.AccentButton=="Use Arc Cache's recorder"&&update.ListBadge=="Blocked"&&update.Warning!.Contains("can't run beside a driver copy"),"An older recorder must offer Arc Cache's: "+update.AccentButton);
+    Check(update.AccentAction==MyGamesAction.UpdateRecorder&&update.AccentButton=="Set up recorder"&&update.ListBadge=="Blocked"&&update.Warning!.Contains("can't run beside a driver copy"),"An older recorder must offer local setup: "+update.AccentButton);
     var other=MyGamesPageStates.Resolve(new MyGamesPageInputs(ModBlocker:recorder));
     Check(other.AccentAction==MyGamesAction.OpenGameFolder,"Without a newer recorder at hand the folder opens, as for any mod.");
 });
@@ -285,7 +295,18 @@ Test("SCSKiller's recorder: its own command, recognised by its version informati
         string official=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"SCSKiller.App","current","native","d3d12.dll");
         if(ScsKillerBridge.IsRecorder(official)&&System.Diagnostics.FileVersionInfo.GetVersionInfo(official).Comments!="exe.local-aware"){File.Copy(official,Path.Combine(folder,"d3d12.dll"),true);Check(ScsKillerBridge.RecorderInstalled(exe)&&!ScsKillerBridge.InstalledRecorderDotLocalAware(exe),"An older recorder was taken for one that runs beside a driver copy.");}
         string? built=null;for(var d=new DirectoryInfo(AppContext.BaseDirectory);d!=null&&built==null;d=d.Parent){string p=Path.Combine(d.FullName,"out","SCSKiller","native","d3d12.dll");if(File.Exists(p))built=p;}
-        if(built!=null){File.Copy(built,Path.Combine(folder,"d3d12.dll"),true);Check(ScsKillerBridge.InstalledRecorderDotLocalAware(exe),"Arc Cache's SCSKiller recorder must run beside a driver copy: "+built);}
+        if(built!=null){
+            File.Copy(built,Path.Combine(folder,"d3d12.dll"),true);Check(ScsKillerBridge.InstalledRecorderDotLocalAware(exe),"Arc Cache's SCSKiller recorder must run beside a driver copy: "+built);
+            string cliDir=Path.Combine(folder,"selected"),hosts=Path.Combine(folder,"hosts");Directory.CreateDirectory(Path.Combine(cliDir,"nested"));
+            string cli=Path.Combine(cliDir,"scskiller.exe"),dependency=Path.Combine(cliDir,"nested","dependency.dll");File.WriteAllText(cli,"selected CLI");File.WriteAllText(dependency,"original dependency");
+            string host=ScsKillerBridge.PrepareRecorderHost(cli,built,hosts),hostDir=Path.GetDirectoryName(host)!;
+            Check(File.ReadAllText(host)=="selected CLI"&&File.ReadAllText(Path.Combine(hostDir,"nested","dependency.dll"))=="original dependency","The selected CLI and dependencies must be preserved.");
+            Check(ScsKillerBridge.IsDotLocalAware(Path.Combine(hostDir,"native","d3d12.dll"))&&!Directory.Exists(Path.Combine(cliDir,"native")),"The compatible recorder must be staged without changing the selected installation.");
+            Check(ScsKillerBridge.PrepareRecorderHost(cli,built,hosts)==host,"Unchanged recorder hosts must be reused.");
+            File.WriteAllText(dependency,"updated dependency");Check(ScsKillerBridge.PrepareRecorderHost(cli,built,hosts)!=host,"An updated dependency must produce a fresh host.");
+            Reject(()=>ScsKillerBridge.PrepareRecorderHost(cli,built,Path.Combine(cliDir,"hosts")));
+            Reject(()=>ScsKillerBridge.PrepareRecorderHost(cli,dependency,hosts));
+        }
     }finally{Directory.Delete(folder,true);}
 });
 Test("SCSKiller options, progress lines and build support are read correctly",()=>{
@@ -305,12 +326,13 @@ Test("SCSKiller options, progress lines and build support are read correctly",()
     var gated=ScsKillerBridge.Describe("x","1.4.1-alpha.1","Installed SCSKiller",1,"error: x\nThis alpha needs a Patreon backer sign-in in the SCSKiller app first.");
     Check(gated.NeedsSignIn&&!gated.PrivateDriverSupport,"An alpha without sign-in must ask for it.");
     var alpha=ScsKillerBridge.Describe("x","1.4.1-alpha.1","Installed SCSKiller",1,"error: unknown command 'arc-cache-info'");
-    Check(!alpha.NeedsSignIn&&!alpha.PrivateDriverSupport&&alpha.Note.Contains("traversal"),"A signed-in alpha is a Default-games SCSKiller.");
+    Check(!alpha.NeedsSignIn&&!alpha.PrivateDriverSupport&&alpha.Note.Contains("local adapter")&&alpha.Note.Contains("public SCSKiller"),"A supplied alpha must distinguish its local recorder from public shader preparation.");
     string tdir=Path.Combine(Path.GetTempPath(),"ArcTraversal-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(tdir);string texe=Path.Combine(tdir,"game.exe");
     try{
         Check(ScsKillerBridge.TraversalOn(texe)==null,"No ini must read as unknown.");
-        File.WriteAllText(Path.Combine(tdir,"scskiller.ini"),"[scskiller]\r\nmode=record\r\n");Check(ScsKillerBridge.TraversalOn(texe)==false,"An ini without traversal keys must read as off.");
-        File.WriteAllText(Path.Combine(tdir,"scskiller.ini"),"[scskiller]\r\ntraversal_suballocate=1\r\n");Check(ScsKillerBridge.TraversalOn(texe)==true,"traversal_suballocate=1 must read as on.");
+        Check(RecorderSettings.FromLines(new[]{"[scskiller]","mode=record"},true).TraversalEnabled==false,"An older recorder without traversal keys must read as off.");
+        Check(RecorderSettings.FromLines(new[]{"[scskiller]","traversal_suballocate=1"},true).TraversalEnabled==true,"traversal_suballocate=1 must read as on.");
+        File.WriteAllText(Path.Combine(tdir,"scskiller.ini"),"traversal_suballocate=1");Check(ScsKillerBridge.TraversalOn(texe)==null,"A stale ini without a recorder must not say On.");
     }finally{Directory.Delete(tdir,true);}
     Check(!upstream.PrivateDriverSupport&&upstream.Version=="1.3.0-beta.2"&&upstream.Note.Contains("Default only"),"An official build was accepted for driver copies.");
     Check(ScsKillerBridge.Origin(@"C:\Users\Nick\Desktop\scskiller-1.3.0-beta.2-portable\current\cli\scskiller.exe")=="Portable SCSKiller","Portable build not named.");
@@ -350,11 +372,21 @@ Test("SCSKiller card reads shader counts, estimates and progress from one model"
     Check(finished.Headline.StartsWith("Done · 1,200 compile jobs")&&finished.Detail.Split("failed").Length==2,"Done must not repeat the failed count: "+finished.Detail);
     Check(ScsPresentation.ParseStatus(["error: no game matches 'steam:1'"],DateTime.UtcNow)==null,"An error was read as a status.");
 });
+Test("Shader preparation distinguishes first-launch verification from gameplay recording",()=>{
+    var first=ScsPreparationState.From(true,true,false,2048,true,false,false,true);
+    Check(!first.CanCompile&&first.Summary.Contains("1. Launch")&&first.Summary.Contains("menu")&&first.Summary.Contains("2. Close")&&first.Summary.Contains("No gameplay recording")&&first.BlockReason!.Contains("no gameplay recording"),"First launch must explain the exact check and disabled-button reason.");
+    var ready=ScsPreparationState.From(true,true,false,2048,true,true,true,true);
+    Check(ready.CanCompile&&ready.BlockReason==null&&ready.Summary.Contains("community")&&ready.Summary.Contains("optional"),"A verified copy must allow community preparation without requiring local recording.");
+    Check(ScsPreparationState.From(true,true,false,512,false,false,false,false).CanCompile,"Default preparation must not require a driver-copy check.");
+    Check(!ScsPreparationState.From(true,true,false,2048,false,false,false,true).Summary.Contains("1. Launch"),"A broken copy must ask for repair, not a launch.");
+    Check(!ScsPreparationState.From(true,true,true,2048,true,true,true,true).CanCompile&&!ScsPreparationState.From(true,true,false,2048,true,true,true,false).CanCompile,"Busy and unsupported connections stay blocked.");
+});
 Test("On-screen stats settings keep auto-start and a known corner",()=>{
     string path=Path.Combine(Path.GetTempPath(),"ArcOverlay-"+Guid.NewGuid().ToString("N")+".json");
     try{
         Check(OverlaySettings.Load(path)==new OverlaySettings(),"Missing settings must default to off, top right.");
         new OverlaySettings(true,"bottom-left").Save(path);Check(OverlaySettings.Load(path)==new OverlaySettings(true,"bottom-left"),"Settings were not kept.");
+        new OverlaySettings(true,"bottom-left",true).Save(path);Check(OverlaySettings.Load(path).SmoothUpdates,"Smooth overlay setting was not kept.");
         File.WriteAllText(path,"{\"AutoStart\":true,\"Corner\":\"middle\"}");Check(OverlaySettings.Load(path)==new OverlaySettings(true,"top-right"),"An unknown corner must fall back to top right.");
         bool rejected=false;try{new OverlaySettings(false,"center").Save(path);}catch(ArgumentException){rejected=true;}Check(rejected,"An unknown corner was saved.");
     }finally{File.Delete(path);}

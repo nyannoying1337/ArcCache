@@ -1,7 +1,7 @@
 # Arc Cache + SCSKiller-Arc build and test (run outside any sandbox: cmd /c tools\claude-build.cmd).
 # Builds only; never runs driver trials, game setups, compiles, Reset or Cleanup.
 # Log: tools\claude-build.log, last line "CLAUDE-BUILD-RESULT: OK" or "CLAUDE-BUILD-RESULT: FAIL <step>".
-param([switch]$SkipScs, [switch]$SkipApp, [switch]$NoLaunch, [switch]$GitStatus, [switch]$GitCommit, [switch]$GitPush, [switch]$Release, [switch]$LocalOnly, [switch]$Task, [string]$Version = '', [string]$RequestFile)
+param([switch]$SkipScs, [switch]$SkipApp, [switch]$NoLaunch, [switch]$GitStatus, [switch]$GitCommit, [switch]$GitPush, [switch]$Release, [switch]$LocalOnly, [switch]$Task, [string]$Version = '', [string]$RequestFile,[string]$ScsKillerRepository)
 if ($RequestFile -and (Test-Path -LiteralPath $RequestFile)) {
     $words = (Get-Content -LiteralPath $RequestFile -Raw) -split '\s+' | Where-Object { $_ }
     $SkipScs = $words -contains '-SkipScs'; $SkipApp = $words -contains '-SkipApp'; $NoLaunch = $words -contains '-NoLaunch'; $GitStatus = $words -contains '-GitStatus'; $GitCommit = $words -contains '-GitCommit'; $GitPush = $words -contains '-GitPush'; $Release = $words -contains '-Release'; $Task = $words -contains '-Task'
@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $tools = $PSScriptRoot
 $repo = Split-Path $tools -Parent                      # ...\work\ArcCache
 $work = Split-Path $repo -Parent                       # ...\work
-$scs = Join-Path $work 'SCSKiller'
+$scs = if($ScsKillerRepository){[IO.Path]::GetFullPath($ScsKillerRepository)}else{Join-Path $work 'SCSKiller-public'}
 $dotnet = Join-Path $work 'dotnet-sdk\dotnet.exe'
 if (!(Test-Path $dotnet)) { $dotnet = 'dotnet' }
 $log = Join-Path $tools 'claude-build.log'
@@ -65,6 +65,9 @@ if ($GitCommit -or $GitPush) {
             & $git -C $r log --stat -1 2>&1 | Select-Object -First 120 | ForEach-Object { Add-Content -LiteralPath $log -Value "$_" }
         }
         if ($GitPush) {
+            if ($r -eq $scs) {
+                & (Join-Path $repo 'packaging\assert-public-scskiller.ps1') -Repository $r | Out-Null
+            }
             $branch = (& $git -C $r rev-parse --abbrev-ref HEAD).Trim()
             $out = & $git -C $r push origin $branch 2>&1; $code = $LASTEXITCODE
             $out | ForEach-Object { Add-Content -LiteralPath $log -Value "$_" }
@@ -93,6 +96,10 @@ if ($GitStatus) {   # read only: what would be committed, and how pushing would 
     exit 0
 }
 try {
+    if (!$SkipScs -or $Release) {
+        if ($SkipScs) { throw 'Public releases must rebuild SCSKiller from reviewed public source; -SkipScs could package private local binaries.' }
+        $reviewedSource=& (Join-Path $repo 'packaging\assert-public-scskiller.ps1') -Repository $scs -ApplyReviewedPatch
+    }
     Say "repo=$repo scs=$scs dotnet=$dotnet"
     Say ("whoami=" + [Environment]::UserName + " localappdata=" + $env:LOCALAPPDATA)
     if ($env:LOCALAPPDATA -match 'Packages\\') { throw 'running inside a packaged (sandboxed) process; start it from Explorer or Run instead' }
@@ -121,54 +128,36 @@ try {
         # every core: MSBuild builds the projects in parallel (--parallel), cl.exe each project's files (/MP)
         $cores = [Environment]::ProcessorCount; $env:CL = '/MP'
         $nb = Join-Path $scs 'proxy\build'
-        # A release ships only SCSKiller source that is public: the checked-out commit must be on a GitHub branch
-        # (origin or upstream). Unreleased alpha/beta source (a local branch such as arc-1.4.1) stays out of installers.
-        if ($Release -and $LocalOnly) { Say '   LOCAL ONLY: this installer may bundle unpublished SCSKiller source; never upload it' }
-        elseif ($Release) {
-            & git -C $scs fetch -q origin 2>$null
-            $public = & git -C $scs branch -r --contains HEAD 2>$null
-            if (!$public) { throw "SCSKiller's checked-out commit isn't on GitHub: a release can't bundle unpublished SCSKiller source. Check out a public branch (intel-cache-cap)." }
-            if (& git -C $scs status --porcelain --untracked-files=no) { throw "SCSKiller has uncommitted changes: a release builds only its public commit." }
+        # Public provenance is pinned and checked above. A local fork/remote is not proof of upstream publication.
+        if ($Release) {
+            & (Join-Path $repo 'packaging\assert-public-scskiller.ps1') -Repository $scs | Out-Null
         }
-        # SCSKiller 1.4 (arc-1.4.1): all native targets, no C# tests. Older (intel-cache-cap, from 1.2.5): its three targets and tests.
-        $scs14 = !(& git -C $scs ls-files 'tests/SCSKiller.Tests')   # tracked files: a build leaves bin\ and obj\ behind
         # The recorder's version: just above the official SCSKiller release it must replace, so either app keeps this
         # exe.local-aware recorder until the official app ships a newer one. Raise it with each official release.
-        $scsBase = if ($scs14) { '1.4.1' } else { '1.3.4' }
-        $cliBase = if ($scs14) { '1.4.1' } else { '1.2.5' }
+        $scsBase = '1.3.4'
+        $cliBase = '1.2.5'
         $nativeVersion = "$scsBase-arc.1"
         Run 'scs-native-configure' $cmake @('-S', (Join-Path $scs 'proxy'), '-B', $nb, '-A', 'x64', "-DSCSK_VERSION=$nativeVersion")
-        if ($scs14) { Run 'scs-native-build' $cmake @('--build', $nb, '--config', 'Release', '--parallel', $cores) }
-        else {
-            Run 'scs-native-build' $cmake @('--build', $nb, '--config', 'Release', '--parallel', $cores, '--target', 'scskiller', 'scskiller_warm', 'scskiller_warm_segheap')
-            Run 'scs-tests' $dotnet @('test', (Join-Path $scs 'tests\SCSKiller.Tests\SCSKiller.Tests.csproj'), '-c', 'Release', '--filter', 'FullyQualifiedName~ArcCacheDriver|FullyQualifiedName~IntelCacheCap|FullyQualifiedName~WarmerTests')
-        }
+        Run 'scs-native-build' $cmake @('--build', $nb, '--config', 'Release', '--parallel', $cores, '--target', 'scskiller', 'scskiller_warm', 'scskiller_warm_segheap', 'selftest')
+        Run 'scs-tests' $dotnet @('test', (Join-Path $scs 'tests\SCSKiller.Tests\SCSKiller.Tests.csproj'), '-c', 'Release', '--filter', 'FullyQualifiedName~ArcCacheDriver|FullyQualifiedName~IntelCacheCap|FullyQualifiedName~WarmerTests')
         $cli = Join-Path $scsOut 'cli'; $native = Join-Path $scsOut 'native'
-        if (Test-Path $scsOut) { Remove-Item -LiteralPath $scsOut -Recurse -Force }
-        $pubArgs = @('publish', (Join-Path $scs 'src\SCSKiller.Cli\SCSKiller.Cli.csproj'), '-c', 'Release', '-o', $cli)
-        if ($scs14) { $pubArgs += @('-r', 'win-x64', '--self-contained', 'true') }
+        if (Test-Path $scsOut) { if([IO.Path]::GetFullPath($scsOut) -ne [IO.Path]::GetFullPath((Join-Path $repo 'out\SCSKiller'))){throw 'Unexpected SCSKiller output path.'}; Remove-Item -LiteralPath $scsOut -Recurse -Force }
+        $pubArgs = @('publish', (Join-Path $scs 'src\SCSKiller.Cli\SCSKiller.Cli.csproj'), '-c', 'Release', '-p:DebugType=None', '-p:DebugSymbols=false', '-o', $cli)
         if ($Version) { $pubArgs += "-p:Version=$cliBase-arc.$($Version -replace '\.','')" }
         Run 'scs-cli-publish' $dotnet $pubArgs
         New-Item -ItemType Directory -Force -Path (Join-Path $native 'segheap') | Out-Null
         $rel = Join-Path $nb 'Release'
         Copy-Item (Join-Path $rel 'scskiller_warm.exe'), (Join-Path $rel 'd3d12.dll') -Destination $native
         Get-ChildItem $rel -Filter 'amd_ags_x64.dll' | Copy-Item -Destination $native
-        if ($scs14) {
-            # as SCSKiller's build\publish.ps1 packs native\
-            New-Item -ItemType Directory -Force -Path (Join-Path $native 'preload') | Out-Null
-            Copy-Item (Join-Path $rel 'scskiller_ags.dll'), (Join-Path $rel 'fossilize-replay.exe'), (Join-Path $rel 'VkLayer_scskiller.dll') -Destination $native
-            Copy-Item (Join-Path $rel 'preload\*.dll') -Destination (Join-Path $native 'preload')
-        }
         Copy-Item (Join-Path $rel 'segheap\scskiller_warm.exe') -Destination (Join-Path $native 'segheap')
         try { Run 'scs-fetch-codecs' (Join-Path $cli 'scskiller.exe') @('fetch-codecs', $cli) } catch { Say "   WARNING: $($_.Exception.Message) (compiles that need codecs may fail)" }
         foreach ($f in @((Join-Path $cli 'scskiller.exe'), (Join-Path $native 'scskiller_warm.exe'), (Join-Path $native 'd3d12.dll'))) {
             Say ("   {0}  {1}" -f (Get-FileHash $f -Algorithm SHA256).Hash, $f)
         }
-        # point Arc Cache at this CLI (the setting the app's Settings page writes)
-        $bridge = Join-Path $env:LOCALAPPDATA 'IntelArcCacheCap\scskiller-bridge.json'
-        if (Test-Path $bridge) { Copy-Item $bridge "$bridge.bak" -Force }
-        @{ CliPath = (Join-Path $cli 'scskiller.exe') } | ConvertTo-Json -Compress | Set-Content -LiteralPath $bridge -Encoding UTF8
-        Say "   scskiller-bridge.json -> $(Join-Path $cli 'scskiller.exe')"
+        $finishedSource=& (Join-Path $repo 'packaging\assert-public-scskiller.ps1') -Repository $scs
+        if($finishedSource.PatchSHA256 -ne $reviewedSource.PatchSHA256){throw 'SCSKiller source changed during its build; packaging is blocked.'}
+        & (Join-Path $repo 'packaging\write-scskiller-provenance.ps1') -Repository $scs -Directory $scsOut
+        Say '   SCSKiller source provenance and binary hashes recorded; user settings preserved'
     }
 
     if (!$SkipApp) {
@@ -218,6 +207,7 @@ try {
         if ($prev) { Get-ChildItem $prev.FullName -File -Filter '*.txt' | Where-Object { $_.Name -match 'LICENSE|NOTICE' } | Copy-Item -Destination $payload }
         Copy-Item -LiteralPath $scsOut -Destination (Join-Path $payload 'SCSKiller') -Recurse
         Copy-Item (Join-Path $scs 'LICENSE'), (Join-Path $scs 'LICENSE-EXCEPTION.txt'), (Join-Path $scs 'THIRD-PARTY-NOTICES.md') -Destination (Join-Path $payload 'SCSKiller')
+        & (Join-Path $repo 'packaging\assert-scskiller-payload.ps1') -Directory (Join-Path $payload 'SCSKiller')
         Get-ChildItem $payload -Recurse -Filter '*.pdb' | Remove-Item -Force
         foreach ($need in @('ArcCache.exe', 'ArcCache.SafetyEngine.exe', 'ArcCache.DriverProbe.exe', 'SCSKiller\cli\scskiller.exe', 'SCSKiller\native\scskiller_warm.exe', 'SCSKiller\native\d3d12.dll')) {
             if (!(Test-Path (Join-Path $payload $need))) { throw "release payload is missing $need" }
@@ -251,6 +241,7 @@ try {
         if (!$iscc) { $hit = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Packages\*\LocalCache\Local\Programs\Inno Setup *\ISCC.exe') -ErrorAction SilentlyContinue | Select-Object -First 1; if ($hit) { $iscc = $hit.FullName } }
         Say "   iscc=$iscc"
         $instArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $repo 'packaging\build-installer.ps1'), '-PayloadDirectory', $payload, '-Version', $Version, '-OutputDirectory', $relRoot)
+        if($LocalOnly){$instArgs+='-LocalOnly'}
         if ($iscc) { $instArgs += @('-CompilerPath', $iscc); Run 'release-installer' 'powershell.exe' $instArgs }
         else { Say '   WARNING: Inno Setup (ISCC.exe) not found - installer skipped, ZIP only (winget install JRSoftware.InnoSetup)' }
         Get-ChildItem $relRoot -File | ForEach-Object { Say ("   {0}  {1:N0} bytes" -f $_.Name, $_.Length) }

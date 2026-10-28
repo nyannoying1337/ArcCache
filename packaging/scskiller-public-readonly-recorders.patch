@@ -1,0 +1,60 @@
+diff --git a/src/SCSKiller.Cli/Program.cs b/src/SCSKiller.Cli/Program.cs
+index 56b9650..8a1e509 100644
+--- a/src/SCSKiller.Cli/Program.cs
++++ b/src/SCSKiller.Cli/Program.cs
+@@ -111,7 +111,9 @@ static int ArcCacheInfo()
+         }
+         catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) { }
+     var version = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(ScsKiller).Assembly)?.InformationalVersion ?? "";
+-    Console.WriteLine(JsonSerializer.Serialize(new { tool = "SCSKiller-Arc", version, arcCacheHandoff = 1, warm, warmDriverLocal = driverLocal }));
++    Console.WriteLine(JsonSerializer.Serialize(new { tool = "SCSKiller-Arc", version, arcCacheHandoff = 1, warm, warmDriverLocal = driverLocal,
++        arcDataDirectory = AppStore.DefaultDir, arcReadOnlyRecorders = Environment.GetEnvironmentVariable("SCSKILLER_ARC_READ_ONLY_RECORDERS") == "1",
++        arcSelectedGame = Environment.GetEnvironmentVariable("SCSKILLER_ARC_SELECTED_GAME") }));
+     return 0;
+ }
+ 
+diff --git a/src/SCSKiller.Core/App/AppStore.cs b/src/SCSKiller.Core/App/AppStore.cs
+index 5900067..1af8820 100644
+--- a/src/SCSKiller.Core/App/AppStore.cs
++++ b/src/SCSKiller.Core/App/AppStore.cs
+@@ -147,7 +147,9 @@ public sealed class AppStore(string dataDir)
+     /// %LOCALAPPDATA%\SCSKiller\armed for both (<see cref="ScsKiller.LedgerDir"/>): the proxy reads it there.</summary>
+     public static string DefaultDir => _defaultDir.Value;
+ 
+-    static readonly Lazy<string> _defaultDir = new(() =>
++    // Arc Cache's public compiler operates on its own data mirror, never on a supplied version's live state.
++    internal static string? ArcDataDir => Environment.GetEnvironmentVariable("SCSKILLER_ARC_DATA_DIR") is { Length: > 0 } directory ? Path.GetFullPath(directory) : null;
++    static readonly Lazy<string> _defaultDir = new(() => ArcDataDir ??
+         Resolve(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SCSKiller"), PortableRoot(AppContext.BaseDirectory), out _onOldFolder));
+ 
+     static IDisposable? _onOldFolder;   // held for the process's life (Resolve)
+diff --git a/src/SCSKiller.Core/App/ScsKiller.cs b/src/SCSKiller.Core/App/ScsKiller.cs
+index d76217d..b641a87 100644
+--- a/src/SCSKiller.Core/App/ScsKiller.cs
++++ b/src/SCSKiller.Core/App/ScsKiller.cs
+@@ -442,6 +442,7 @@ public sealed partial class ScsKiller : IScsKiller
+             && Store.LoadDiscovered(CoreBuild) is { Count: > 0 } listed)
+             return Listed(started, kept.Games, listed);
+         var (found, unresolved) = Discover(Store.LoadDiscovered(CoreBuild), s => s.Discover(), fresh: userRequested);
++        if (Environment.GetEnvironmentVariable("SCSKILLER_ARC_SELECTED_GAME") is { Length: > 0 } selected) found.RemoveAll(g => g.Id != selected);
+         var states = new List<GameState>();
+         var tickets = new List<long>();
+         var driverStale = new List<bool>();
+@@ -3253,6 +3254,8 @@ public sealed partial class ScsKiller : IScsKiller
+     /// <summary>True when the game was re-evaluated; a running game's change waits for it to exit.</summary>
+     bool Reconcile(GameState s)
+     {
++        // Arc Cache's compile/status mirror must not install, update, move or remove the user's live recorder.
++        if (Environment.GetEnvironmentVariable("SCSKILLER_ARC_READ_ONLY_RECORDERS") == "1") return false;
+         var (g, id) = (s.Game, s.Game.Id);
+         if (OfflineLive(id) || _unread.ContainsKey(id)) return false;   // its own end takes it out; a failed evaluation changes nothing
+         var dir = Path.GetDirectoryName(g.ExePath)!;
+@@ -5384,7 +5387,7 @@ public sealed partial class ScsKiller : IScsKiller
+ 
+     /// <summary>The app's ledger of armed exes, outside every game folder: an entry per exe holds the nonce its
+     /// <see cref="ArmedFile"/> must hold too. The proxy finds it through FOLDERID_LocalAppData.</summary>
+-    internal static string LedgerDir { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SCSKiller", "armed");   // replaceable for tests
++    internal static string LedgerDir { get; set; } = Path.Combine(AppStore.ArcDataDir ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SCSKiller"), "armed");   // replaceable for tests
+ 
+     /// <summary>Deletes the exe's revocation mark, on which the proxy refuses. Throws when it can't.</summary>
+     internal static void DeleteRevocationMark(string exe)
