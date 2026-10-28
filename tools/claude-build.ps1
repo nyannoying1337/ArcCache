@@ -119,22 +119,43 @@ try {
     if (!$SkipScs) {
         if (!$cmake) { throw 'cmake not found (install the VS "C++ CMake tools" component)' }
         $nb = Join-Path $scs 'proxy\build'
-        # The recorder's version: just above the official SCSKiller release it must replace (1.4.1), so either app keeps
-        # this exe.local-aware recorder until the official app ships a newer one. Raise it with each official release.
-        $scsBase = '1.4.1'
+        # A release ships only SCSKiller source that is public: the checked-out commit must be on a GitHub branch
+        # (origin or upstream). Unreleased alpha/beta source (a local branch such as arc-1.4.1) stays out of installers.
+        if ($Release) {
+            & git -C $scs fetch -q origin 2>$null
+            $public = & git -C $scs branch -r --contains HEAD 2>$null
+            if (!$public) { throw "SCSKiller's checked-out commit isn't on GitHub: a release can't bundle unpublished SCSKiller source. Check out a public branch (intel-cache-cap)." }
+            if (& git -C $scs status --porcelain --untracked-files=no) { throw "SCSKiller has uncommitted changes: a release builds only its public commit." }
+        }
+        # SCSKiller 1.4 (arc-1.4.1): all native targets, no C# tests. Older (intel-cache-cap, from 1.2.5): its three targets and tests.
+        $scs14 = !(Test-Path (Join-Path $scs 'tests\SCSKiller.Tests'))
+        # The recorder's version: just above the official SCSKiller release it must replace, so either app keeps this
+        # exe.local-aware recorder until the official app ships a newer one. Raise it with each official release.
+        $scsBase = if ($scs14) { '1.4.1' } else { '1.3.4' }
+        $cliBase = if ($scs14) { '1.4.1' } else { '1.2.5' }
         $nativeVersion = "$scsBase-arc.1"
         Run 'scs-native-configure' $cmake @('-S', (Join-Path $scs 'proxy'), '-B', $nb, '-A', 'x64', "-DSCSK_VERSION=$nativeVersion")
-        Run 'scs-native-build' $cmake @('--build', $nb, '--config', 'Release')
+        if ($scs14) { Run 'scs-native-build' $cmake @('--build', $nb, '--config', 'Release') }
+        else {
+            Run 'scs-native-build' $cmake @('--build', $nb, '--config', 'Release', '--target', 'scskiller', 'scskiller_warm', 'scskiller_warm_segheap')
+            Run 'scs-tests' $dotnet @('test', (Join-Path $scs 'tests\SCSKiller.Tests\SCSKiller.Tests.csproj'), '-c', 'Release', '--filter', 'FullyQualifiedName~ArcCacheDriver|FullyQualifiedName~IntelCacheCap|FullyQualifiedName~WarmerTests')
+        }
         $cli = Join-Path $scsOut 'cli'; $native = Join-Path $scsOut 'native'
         if (Test-Path $scsOut) { Remove-Item -LiteralPath $scsOut -Recurse -Force }
-        $pubArgs = @('publish', (Join-Path $scs 'src\SCSKiller.Cli\SCSKiller.Cli.csproj'), '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '-o', $cli)
-        if ($Version) { $pubArgs += "-p:Version=$scsBase-arc.$($Version -replace '\.','')" }
+        $pubArgs = @('publish', (Join-Path $scs 'src\SCSKiller.Cli\SCSKiller.Cli.csproj'), '-c', 'Release', '-o', $cli)
+        if ($scs14) { $pubArgs += @('-r', 'win-x64', '--self-contained', 'true') }
+        if ($Version) { $pubArgs += "-p:Version=$cliBase-arc.$($Version -replace '\.','')" }
         Run 'scs-cli-publish' $dotnet $pubArgs
-        New-Item -ItemType Directory -Force -Path (Join-Path $native 'segheap'), (Join-Path $native 'preload') | Out-Null
+        New-Item -ItemType Directory -Force -Path (Join-Path $native 'segheap') | Out-Null
         $rel = Join-Path $nb 'Release'
-        # as SCSKiller's build\publish.ps1 packs native\
-        Copy-Item (Join-Path $rel 'scskiller_warm.exe'), (Join-Path $rel 'd3d12.dll'), (Join-Path $rel 'amd_ags_x64.dll'), (Join-Path $rel 'scskiller_ags.dll'), (Join-Path $rel 'fossilize-replay.exe'), (Join-Path $rel 'VkLayer_scskiller.dll') -Destination $native
-        Copy-Item (Join-Path $rel 'preload\*.dll') -Destination (Join-Path $native 'preload')
+        Copy-Item (Join-Path $rel 'scskiller_warm.exe'), (Join-Path $rel 'd3d12.dll') -Destination $native
+        Get-ChildItem $rel -Filter 'amd_ags_x64.dll' | Copy-Item -Destination $native
+        if ($scs14) {
+            # as SCSKiller's build\publish.ps1 packs native\
+            New-Item -ItemType Directory -Force -Path (Join-Path $native 'preload') | Out-Null
+            Copy-Item (Join-Path $rel 'scskiller_ags.dll'), (Join-Path $rel 'fossilize-replay.exe'), (Join-Path $rel 'VkLayer_scskiller.dll') -Destination $native
+            Copy-Item (Join-Path $rel 'preload\*.dll') -Destination (Join-Path $native 'preload')
+        }
         Copy-Item (Join-Path $rel 'segheap\scskiller_warm.exe') -Destination (Join-Path $native 'segheap')
         try { Run 'scs-fetch-codecs' (Join-Path $cli 'scskiller.exe') @('fetch-codecs', $cli) } catch { Say "   WARNING: $($_.Exception.Message) (compiles that need codecs may fail)" }
         foreach ($f in @((Join-Path $cli 'scskiller.exe'), (Join-Path $native 'scskiller_warm.exe'), (Join-Path $native 'd3d12.dll'))) {
